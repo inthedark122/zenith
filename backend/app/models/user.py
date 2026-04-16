@@ -29,3 +29,5 @@ class User(Base):
     wallet = relationship("Wallet", back_populates="user", uselist=False)
     trades = relationship("Trade", back_populates="user")
     dca_configs = relationship("DCAConfig", back_populates="user")
+    macd_configs = relationship("MACDConfig", back_populates="user")
+    macd_trades = relationship("MACDTrade", back_populates="user")
