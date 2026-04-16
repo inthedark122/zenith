@@ -5,6 +5,51 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
 
+# ---------------------------------------------------------------------------
+# Unified strategy response schemas
+# ---------------------------------------------------------------------------
+
+class StrategyConfigResponse(BaseModel):
+    """
+    Generic response for any strategy configuration.
+    Strategy-specific params are under ``settings``.
+    """
+    id: int
+    user_id: int
+    strategy_type: str
+    symbol: str
+    is_active: int
+    settings: Dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class StrategyTradeResponse(BaseModel):
+    """
+    Generic response for any strategy trade.
+    Strategy-specific trade data is under ``details``.
+    """
+    id: int
+    user_id: int
+    config_id: Optional[int]
+    strategy_type: str
+    symbol: str
+    exchange: str
+    status: str
+    trade_date: Optional[date]
+    details: Dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# DCA strategy — request schemas
+# ---------------------------------------------------------------------------
+
 class DCAConfigCreate(BaseModel):
     symbol: str
     base_amount: Decimal
@@ -13,44 +58,8 @@ class DCAConfigCreate(BaseModel):
     max_safety_orders: int = 6
 
 
-class DCAConfigResponse(BaseModel):
-    id: int
-    user_id: int
-    symbol: str
-    base_amount: Decimal
-    safety_order_multiplier: float
-    price_deviation: float
-    max_safety_orders: int
-    is_active: int
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-class TradeCreate(BaseModel):
-    symbol: str
-    exchange: str = "okx"
-    base_order_amount: Decimal
-
-
-class TradeResponse(BaseModel):
-    id: int
-    user_id: int
-    symbol: str
-    exchange: str
-    strategy: str
-    status: str
-    base_order_amount: Decimal
-    safety_orders: List[Dict[str, Any]]
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
 # ---------------------------------------------------------------------------
-# MACD D1 strategy schemas
+# MACD D1 strategy — request schemas
 # ---------------------------------------------------------------------------
 
 class MACDConfigCreate(BaseModel):
@@ -60,46 +69,12 @@ class MACDConfigCreate(BaseModel):
     rr_ratio: float = 2.0
 
 
-class MACDConfigResponse(BaseModel):
-    id: int
-    user_id: int
-    symbol: str
-    margin_per_trade: Decimal
-    leverage: float
-    rr_ratio: float
-    is_active: int
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
 class MACDTradeOpen(BaseModel):
     entry_price: float
 
 
 class MACDTradeClose(BaseModel):
     result: str   # 'win' or 'loss'
-
-
-class MACDTradeResponse(BaseModel):
-    id: int
-    user_id: int
-    config_id: int
-    symbol: str
-    timeframe: str
-    entry_number: int
-    entry_price: Optional[Decimal]
-    take_profit_price: Optional[Decimal]
-    stop_loss_price: Optional[Decimal]
-    margin: Decimal
-    leverage: float
-    result: str
-    trade_date: date
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 class MACDSignalResponse(BaseModel):

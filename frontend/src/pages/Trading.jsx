@@ -27,7 +27,6 @@ const s = {
     color: result === 'win' ? '#34d399' : result === 'loss' ? '#f87171' : '#fbbf24',
     borderRadius: '6px', padding: '3px 10px', fontSize: '12px', fontWeight: '600',
   }),
-  botDetail: { color: '#888', fontSize: '12px' },
   error: { color: '#f87171', fontSize: '13px', margin: '0 20px 8px' },
   success: { color: '#34d399', fontSize: '13px', margin: '0 20px 8px' },
   sectionTitle: { color: '#fff', fontSize: '16px', fontWeight: '600', padding: '16px 20px 8px' },
@@ -41,12 +40,12 @@ const s = {
   crossBull: { color: '#34d399', fontWeight: '700', fontSize: '13px' },
   crossBear: { color: '#f87171', fontWeight: '700', fontSize: '13px' },
   crossNone: { color: '#888', fontWeight: '600', fontSize: '13px' },
-  divider: { borderTop: '1px solid #222', margin: '16px 0' },
   infoBox: { background: '#1a1a2e', border: '1px solid #6c47ff33', borderRadius: '10px', padding: '14px', marginBottom: '14px' },
   infoText: { color: '#a78bfa', fontSize: '12px', lineHeight: '1.6' },
 }
 
 // ---- DCA Panel ----
+// cfg.settings: { base_amount, safety_order_multiplier, price_deviation, max_safety_orders }
 function DCAPanel() {
   const [configs, setConfigs] = useState([])
   const [form, setForm] = useState({ symbol: 'BTC/USDT', base_amount: '100', safety_order_multiplier: '2', price_deviation: '0.04', max_safety_orders: '6' })
@@ -61,7 +60,9 @@ function DCAPanel() {
 
   const handleCreate = async (e) => {
     e.preventDefault()
-    setLoading(true); setError(''); setSuccess('')
+    setLoading(true)
+    setError('')
+    setSuccess('')
     try {
       await client.post('/trading/dca-configs', {
         symbol: form.symbol,
@@ -74,11 +75,19 @@ function DCAPanel() {
       loadConfigs()
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to create config')
-    } finally { setLoading(false) }
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const handleStart = async (id) => { try { await client.post(`/trading/start/${id}`); loadConfigs() } catch (err) { setError(err.response?.data?.detail || 'Failed') } }
-  const handleStop = async (id) => { try { await client.post(`/trading/stop/${id}`); loadConfigs() } catch (err) { setError(err.response?.data?.detail || 'Failed') } }
+  const handleStart = async (id) => {
+    try { await client.post(`/trading/start/${id}`); loadConfigs() }
+    catch (err) { setError(err.response?.data?.detail || 'Failed') }
+  }
+  const handleStop = async (id) => {
+    try { await client.post(`/trading/stop/${id}`); loadConfigs() }
+    catch (err) { setError(err.response?.data?.detail || 'Failed') }
+  }
 
   return (
     <>
@@ -95,35 +104,67 @@ function DCAPanel() {
           <label style={s.label}>Base Order Amount (USDT)</label>
           <input style={s.input} type="number" value={form.base_amount} onChange={set('base_amount')} min="1" step="any" required />
           <div style={s.row}>
-            <div style={{ flex: 1 }}><label style={s.label}>Multiplier</label><input style={s.input} type="number" value={form.safety_order_multiplier} onChange={set('safety_order_multiplier')} step="0.1" min="1" /></div>
-            <div style={{ flex: 1 }}><label style={s.label}>Price Dev %</label><input style={s.input} type="number" value={form.price_deviation} onChange={set('price_deviation')} step="0.01" min="0.01" max="1" /></div>
-            <div style={{ flex: 1 }}><label style={s.label}>Max Safety</label><input style={s.input} type="number" value={form.max_safety_orders} onChange={set('max_safety_orders')} min="1" max="10" /></div>
+            <div style={{ flex: 1 }}>
+              <label style={s.label}>Multiplier</label>
+              <input style={s.input} type="number" value={form.safety_order_multiplier} onChange={set('safety_order_multiplier')} step="0.1" min="1" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={s.label}>Price Dev %</label>
+              <input style={s.input} type="number" value={form.price_deviation} onChange={set('price_deviation')} step="0.01" min="0.01" max="1" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={s.label}>Max Safety</label>
+              <input style={s.input} type="number" value={form.max_safety_orders} onChange={set('max_safety_orders')} min="1" max="10" />
+            </div>
           </div>
           <button type="submit" style={s.btn} disabled={loading}>{loading ? 'Creating…' : 'Create Bot'}</button>
         </form>
       </div>
+
       {error && <div style={s.error}>{error}</div>}
       {success && <div style={s.success}>{success}</div>}
+
       <div style={s.sectionTitle}>My DCA Bots</div>
-      {configs.length === 0 ? <div style={s.empty}>No DCA bots configured yet</div> : configs.map((cfg) => (
-        <div key={cfg.id} style={s.botCard}>
-          <div style={s.botHeader}>
-            <div style={s.botSymbol}>{cfg.symbol}</div>
-            <span style={s.statusBadge(cfg.is_active)}>{cfg.is_active ? 'Running' : 'Idle'}</span>
-          </div>
-          <div style={{ display: 'flex', gap: '16px', marginBottom: '12px', flexWrap: 'wrap' }}>
-            {[{ l: 'Base Amount', v: `$${cfg.base_amount}` }, { l: 'Multiplier', v: `${cfg.safety_order_multiplier}×` }, { l: 'Deviation', v: `${(cfg.price_deviation * 100).toFixed(0)}%` }, { l: 'Max Orders', v: cfg.max_safety_orders }].map(({ l, v }) => (
-              <div key={l}><div style={{ color: '#555', fontSize: '11px' }}>{l}</div><div style={{ color: '#fff', fontWeight: '600', fontSize: '13px' }}>{v}</div></div>
-            ))}
-          </div>
-          <div style={s.row}>{cfg.is_active ? <button style={s.btnOutline} onClick={() => handleStop(cfg.id)}>⏹ Stop</button> : <button style={s.btn} onClick={() => handleStart(cfg.id)}>▶ Start</button>}</div>
-        </div>
-      ))}
+      {configs.length === 0 ? (
+        <div style={s.empty}>No DCA bots configured yet</div>
+      ) : (
+        configs.map((cfg) => {
+          const st = cfg.settings || {}
+          return (
+            <div key={cfg.id} style={s.botCard}>
+              <div style={s.botHeader}>
+                <div style={s.botSymbol}>{cfg.symbol}</div>
+                <span style={s.statusBadge(cfg.is_active)}>{cfg.is_active ? 'Running' : 'Idle'}</span>
+              </div>
+              <div style={{ display: 'flex', gap: '16px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                {[
+                  { l: 'Base Amount', v: `$${st.base_amount}` },
+                  { l: 'Multiplier', v: `${st.safety_order_multiplier}×` },
+                  { l: 'Deviation', v: `${((st.price_deviation || 0) * 100).toFixed(0)}%` },
+                  { l: 'Max Orders', v: st.max_safety_orders },
+                ].map(({ l, v }) => (
+                  <div key={l}>
+                    <div style={{ color: '#555', fontSize: '11px' }}>{l}</div>
+                    <div style={{ color: '#fff', fontWeight: '600', fontSize: '13px' }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={s.row}>
+                {cfg.is_active
+                  ? <button style={s.btnOutline} onClick={() => handleStop(cfg.id)}>⏹ Stop</button>
+                  : <button style={s.btn} onClick={() => handleStart(cfg.id)}>▶ Start</button>}
+              </div>
+            </div>
+          )
+        })
+      )}
     </>
   )
 }
 
 // ---- MACD D1 Panel ----
+// cfg.settings: { margin_per_trade, leverage, rr_ratio }
+// trade.details: { timeframe, entry_number, entry_price, take_profit_price, stop_loss_price, margin, leverage }
 function MACDPanel() {
   const [configs, setConfigs] = useState([])
   const [trades, setTrades] = useState([])
@@ -145,7 +186,9 @@ function MACDPanel() {
 
   const handleCreate = async (e) => {
     e.preventDefault()
-    setLoading(true); setError(''); setSuccess('')
+    setLoading(true)
+    setError('')
+    setSuccess('')
     try {
       await client.post('/trading/macd-configs', {
         symbol: form.symbol,
@@ -157,11 +200,14 @@ function MACDPanel() {
       loadAll()
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to create MACD config')
-    } finally { setLoading(false) }
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleCheckSignal = async (configId) => {
-    setSignalConfigId(configId); setSignal(null)
+    setSignalConfigId(configId)
+    setSignal(null)
     try {
       const { data } = await client.get(`/trading/macd-signal/${configId}`)
       setSignal(data)
@@ -172,7 +218,8 @@ function MACDPanel() {
 
   const handleOpenTrade = async (e) => {
     e.preventDefault()
-    setError(''); setSuccess('')
+    setError('')
+    setSuccess('')
     try {
       await client.post(`/trading/macd-open/${openForm.configId}`, { entry_price: parseFloat(openForm.entry_price) })
       setSuccess('Trade opened!')
@@ -216,9 +263,18 @@ function MACDPanel() {
             {MACD_SYMBOLS.map((sym) => <option key={sym} value={sym}>{sym}</option>)}
           </select>
           <div style={s.row}>
-            <div style={{ flex: 1 }}><label style={s.label}>Margin / Trade (USDT)</label><input style={s.input} type="number" value={form.margin_per_trade} onChange={set('margin_per_trade')} min="1" step="any" required /></div>
-            <div style={{ flex: 1 }}><label style={s.label}>Leverage</label><input style={s.input} type="number" value={form.leverage} onChange={set('leverage')} min="1" max="125" step="1" required /></div>
-            <div style={{ flex: 1 }}><label style={s.label}>R:R Ratio</label><input style={s.input} type="number" value={form.rr_ratio} onChange={set('rr_ratio')} min="1" step="0.1" /></div>
+            <div style={{ flex: 1 }}>
+              <label style={s.label}>Margin / Trade (USDT)</label>
+              <input style={s.input} type="number" value={form.margin_per_trade} onChange={set('margin_per_trade')} min="1" step="any" required />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={s.label}>Leverage</label>
+              <input style={s.input} type="number" value={form.leverage} onChange={set('leverage')} min="1" max="125" step="1" required />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={s.label}>R:R Ratio</label>
+              <input style={s.input} type="number" value={form.rr_ratio} onChange={set('rr_ratio')} min="1" step="0.1" />
+            </div>
           </div>
           <button type="submit" style={s.btn} disabled={loading}>{loading ? 'Creating…' : 'Create Bot'}</button>
         </form>
@@ -228,87 +284,126 @@ function MACDPanel() {
       {success && <div style={s.success}>{success}</div>}
 
       <div style={s.sectionTitle}>My MACD Bots</div>
-      {configs.length === 0 ? <div style={s.empty}>No MACD bots configured yet</div> : configs.map((cfg) => (
-        <div key={cfg.id} style={s.botCard}>
-          <div style={s.botHeader}>
-            <div style={s.botSymbol}>{cfg.symbol}</div>
-            <span style={{ color: '#a78bfa', fontSize: '12px' }}>MACD D1</span>
-          </div>
-          <div style={{ display: 'flex', gap: '16px', marginBottom: '12px', flexWrap: 'wrap' }}>
-            {[{ l: 'Margin', v: `$${cfg.margin_per_trade}` }, { l: 'Leverage', v: `${cfg.leverage}×` }, { l: 'Max Daily', v: `$${(cfg.margin_per_trade * 2).toFixed(2)}` }, { l: 'R:R', v: `1:${cfg.rr_ratio}` }].map(({ l, v }) => (
-              <div key={l}><div style={{ color: '#555', fontSize: '11px' }}>{l}</div><div style={{ color: '#fff', fontWeight: '600', fontSize: '13px' }}>{v}</div></div>
-            ))}
-          </div>
-
-          {/* Signal block */}
-          {signalConfigId === cfg.id && signal && (
-            <div style={s.signalBox}>
-              <div style={s.signalRow}><span style={s.signalKey}>MACD</span><span style={s.signalVal}>{signal.macd.toFixed(4)}</span></div>
-              <div style={s.signalRow}><span style={s.signalKey}>Signal</span><span style={s.signalVal}>{signal.signal.toFixed(4)}</span></div>
-              <div style={s.signalRow}><span style={s.signalKey}>Histogram</span><span style={s.signalVal}>{signal.histogram.toFixed(4)}</span></div>
-              <div style={s.signalRow}>
-                <span style={s.signalKey}>D1 Cross</span>
-                {signal.is_bullish_crossover ? <span style={s.crossBull}>🟢 Bullish Crossover — LONG signal</span>
-                  : signal.is_bearish_crossover ? <span style={s.crossBear}>🔴 Bearish Crossover</span>
-                  : <span style={s.crossNone}>No crossover</span>}
+      {configs.length === 0 ? (
+        <div style={s.empty}>No MACD bots configured yet</div>
+      ) : (
+        configs.map((cfg) => {
+          const st = cfg.settings || {}
+          const maxDaily = ((parseFloat(st.margin_per_trade) || 0) * 2).toFixed(2)
+          return (
+            <div key={cfg.id} style={s.botCard}>
+              <div style={s.botHeader}>
+                <div style={s.botSymbol}>{cfg.symbol}</div>
+                <span style={{ color: '#a78bfa', fontSize: '12px' }}>MACD D1</span>
               </div>
-              <div style={s.signalRow}>
-                <span style={s.signalKey}>Today's entries</span>
-                <span style={signal.can_open_trade ? s.crossBull : s.crossBear}>
-                  {signal.can_open_trade ? `Entry #${signal.next_entry_number} available` : 'Daily limit reached'}
-                </span>
+              <div style={{ display: 'flex', gap: '16px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                {[
+                  { l: 'Margin', v: `$${st.margin_per_trade}` },
+                  { l: 'Leverage', v: `${st.leverage}×` },
+                  { l: 'Max Daily', v: `$${maxDaily}` },
+                  { l: 'R:R', v: `1:${st.rr_ratio}` },
+                ].map(({ l, v }) => (
+                  <div key={l}>
+                    <div style={{ color: '#555', fontSize: '11px' }}>{l}</div>
+                    <div style={{ color: '#fff', fontWeight: '600', fontSize: '13px' }}>{v}</div>
+                  </div>
+                ))}
               </div>
-              <div style={{ color: '#555', fontSize: '11px', marginTop: '4px' }}>{signal.daily_status_reason}</div>
-            </div>
-          )}
 
-          {/* Open trade form */}
-          {openForm.configId === cfg.id && (
-            <form onSubmit={handleOpenTrade} style={{ marginBottom: '10px' }}>
-              <label style={s.label}>Entry Price (USDT)</label>
-              <input style={s.input} type="number" step="any" value={openForm.entry_price} onChange={(e) => setOpenForm((f) => ({ ...f, entry_price: e.target.value }))} placeholder="e.g. 65000" required />
+              {signalConfigId === cfg.id && signal && (
+                <div style={s.signalBox}>
+                  <div style={s.signalRow}><span style={s.signalKey}>MACD</span><span style={s.signalVal}>{signal.macd.toFixed(4)}</span></div>
+                  <div style={s.signalRow}><span style={s.signalKey}>Signal</span><span style={s.signalVal}>{signal.signal.toFixed(4)}</span></div>
+                  <div style={s.signalRow}><span style={s.signalKey}>Histogram</span><span style={s.signalVal}>{signal.histogram.toFixed(4)}</span></div>
+                  <div style={s.signalRow}>
+                    <span style={s.signalKey}>D1 Cross</span>
+                    {signal.is_bullish_crossover
+                      ? <span style={s.crossBull}>🟢 Bullish Crossover — LONG signal</span>
+                      : signal.is_bearish_crossover
+                        ? <span style={s.crossBear}>🔴 Bearish Crossover</span>
+                        : <span style={s.crossNone}>No crossover</span>}
+                  </div>
+                  <div style={s.signalRow}>
+                    <span style={s.signalKey}>Today&apos;s entries</span>
+                    <span style={signal.can_open_trade ? s.crossBull : s.crossBear}>
+                      {signal.can_open_trade ? `Entry #${signal.next_entry_number} available` : 'Daily limit reached'}
+                    </span>
+                  </div>
+                  <div style={{ color: '#555', fontSize: '11px', marginTop: '4px' }}>{signal.daily_status_reason}</div>
+                </div>
+              )}
+
+              {openForm.configId === cfg.id && (
+                <form onSubmit={handleOpenTrade} style={{ marginBottom: '10px' }}>
+                  <label style={s.label}>Entry Price (USDT)</label>
+                  <input
+                    style={s.input}
+                    type="number"
+                    step="any"
+                    value={openForm.entry_price}
+                    onChange={(e) => setOpenForm((f) => ({ ...f, entry_price: e.target.value }))}
+                    placeholder="e.g. 65000"
+                    required
+                  />
+                  <div style={s.row}>
+                    <button type="submit" style={s.btnGreen}>Open Long</button>
+                    <button type="button" style={s.btnOutline} onClick={() => setOpenForm({ configId: null, entry_price: '' })}>Cancel</button>
+                  </div>
+                </form>
+              )}
+
               <div style={s.row}>
-                <button type="submit" style={s.btnGreen}>Open Long</button>
-                <button type="button" style={s.btnOutline} onClick={() => setOpenForm({ configId: null, entry_price: '' })}>Cancel</button>
+                <button style={s.btn} onClick={() => handleCheckSignal(cfg.id)}>📊 Check Signal</button>
+                {signal?.can_open_trade && signalConfigId === cfg.id && openForm.configId !== cfg.id && (
+                  <button style={s.btnGreen} onClick={() => setOpenForm({ configId: cfg.id, entry_price: '' })}>+ Open Trade</button>
+                )}
               </div>
-            </form>
-          )}
-
-          <div style={s.row}>
-            <button style={s.btn} onClick={() => handleCheckSignal(cfg.id)}>📊 Check Signal</button>
-            {signal?.can_open_trade && signalConfigId === cfg.id && openForm.configId !== cfg.id && (
-              <button style={s.btnGreen} onClick={() => setOpenForm({ configId: cfg.id, entry_price: '' })}>+ Open Trade</button>
-            )}
-          </div>
-        </div>
-      ))}
-
-      <div style={s.sectionTitle}>Today's MACD Trades</div>
-      {todayTrades.length === 0 ? <div style={s.empty}>No trades today</div> : todayTrades.map((t) => (
-        <div key={t.id} style={s.botCard}>
-          <div style={s.botHeader}>
-            <div style={s.botSymbol}>{t.symbol} <span style={{ color: '#888', fontSize: '13px', fontWeight: 400 }}>Entry #{t.entry_number} · {t.timeframe.toUpperCase()}</span></div>
-            <span style={s.resultBadge(t.result)}>{t.result.toUpperCase()}</span>
-          </div>
-          <div style={{ display: 'flex', gap: '16px', marginBottom: '10px', flexWrap: 'wrap' }}>
-            {[
-              { l: 'Entry', v: t.entry_price ? `$${parseFloat(t.entry_price).toFixed(2)}` : '—' },
-              { l: 'Take Profit', v: t.take_profit_price ? `$${parseFloat(t.take_profit_price).toFixed(2)}` : '—' },
-              { l: 'Stop Loss', v: t.stop_loss_price ? `$${parseFloat(t.stop_loss_price).toFixed(2)}` : '—' },
-              { l: 'Margin', v: `$${t.margin}` },
-              { l: 'Leverage', v: `${t.leverage}×` },
-            ].map(({ l, v }) => (
-              <div key={l}><div style={{ color: '#555', fontSize: '11px' }}>{l}</div><div style={{ color: '#fff', fontWeight: '600', fontSize: '13px' }}>{v}</div></div>
-            ))}
-          </div>
-          {t.result === 'open' && (
-            <div style={s.row}>
-              <button style={s.btnGreen} onClick={() => handleCloseTrade(t.id, 'win')}>✅ Close Win</button>
-              <button style={s.btnRed} onClick={() => handleCloseTrade(t.id, 'loss')}>❌ Close Loss</button>
             </div>
-          )}
-        </div>
-      ))}
+          )
+        })
+      )}
+
+      <div style={s.sectionTitle}>Today&apos;s MACD Trades</div>
+      {todayTrades.length === 0 ? (
+        <div style={s.empty}>No trades today</div>
+      ) : (
+        todayTrades.map((t) => {
+          const d = t.details || {}
+          return (
+            <div key={t.id} style={s.botCard}>
+              <div style={s.botHeader}>
+                <div style={s.botSymbol}>
+                  {t.symbol}{' '}
+                  <span style={{ color: '#888', fontSize: '13px', fontWeight: 400 }}>
+                    Entry #{d.entry_number} · {(d.timeframe || '').toUpperCase()}
+                  </span>
+                </div>
+                <span style={s.resultBadge(t.status)}>{t.status.toUpperCase()}</span>
+              </div>
+              <div style={{ display: 'flex', gap: '16px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                {[
+                  { l: 'Entry', v: d.entry_price ? `$${parseFloat(d.entry_price).toFixed(2)}` : '—' },
+                  { l: 'Take Profit', v: d.take_profit_price ? `$${parseFloat(d.take_profit_price).toFixed(2)}` : '—' },
+                  { l: 'Stop Loss', v: d.stop_loss_price ? `$${parseFloat(d.stop_loss_price).toFixed(2)}` : '—' },
+                  { l: 'Margin', v: `$${d.margin}` },
+                  { l: 'Leverage', v: `${d.leverage}×` },
+                ].map(({ l, v }) => (
+                  <div key={l}>
+                    <div style={{ color: '#555', fontSize: '11px' }}>{l}</div>
+                    <div style={{ color: '#fff', fontWeight: '600', fontSize: '13px' }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              {t.status === 'open' && (
+                <div style={s.row}>
+                  <button style={s.btnGreen} onClick={() => handleCloseTrade(t.id, 'win')}>✅ Close Win</button>
+                  <button style={s.btnRed} onClick={() => handleCloseTrade(t.id, 'loss')}>❌ Close Loss</button>
+                </div>
+              )}
+            </div>
+          )
+        })
+      )}
     </>
   )
 }

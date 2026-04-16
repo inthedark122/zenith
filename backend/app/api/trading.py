@@ -6,18 +6,16 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user, get_db
 from app.models.subscription import Subscription
-from app.models.trade import DCAConfig, MACDConfig, MACDTrade, Trade, MACD_ALLOWED_SYMBOLS
+from app.models.trade import MACD_ALLOWED_SYMBOLS, StrategyConfig, StrategyTrade
 from app.models.user import User
 from app.schemas.trade import (
     DCAConfigCreate,
-    DCAConfigResponse,
     MACDConfigCreate,
-    MACDConfigResponse,
     MACDSignalResponse,
     MACDTradeClose,
     MACDTradeOpen,
-    MACDTradeResponse,
-    TradeResponse,
+    StrategyConfigResponse,
+    StrategyTradeResponse,
 )
 from app.services.dca_strategy import calculate_dca_orders
 from app.services.exchange import exchange_service
@@ -45,7 +43,31 @@ def _assert_has_active_subscription(user: User, db: Session):
     return active
 
 
-@router.post("/dca-configs", response_model=DCAConfigResponse, status_code=status.HTTP_201_CREATED)
+def _get_config_or_404(
+    config_id: int,
+    strategy_type: str,
+    user_id: int,
+    db: Session,
+) -> StrategyConfig:
+    cfg = (
+        db.query(StrategyConfig)
+        .filter(
+            StrategyConfig.id == config_id,
+            StrategyConfig.strategy_type == strategy_type,
+            StrategyConfig.user_id == user_id,
+        )
+        .first()
+    )
+    if cfg is None:
+        raise HTTPException(status_code=404, detail=f"{strategy_type.upper()} config not found")
+    return cfg
+
+
+# ---------------------------------------------------------------------------
+# DCA strategy endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/dca-configs", response_model=StrategyConfigResponse, status_code=status.HTTP_201_CREATED)
 def create_dca_config(
     payload: DCAConfigCreate,
     db: Session = Depends(get_db),
@@ -58,13 +80,16 @@ def create_dca_config(
             detail=f"Symbol {payload.symbol} is not in your subscription coins",
         )
 
-    config = DCAConfig(
+    config = StrategyConfig(
         user_id=current_user.id,
+        strategy_type="dca",
         symbol=payload.symbol,
-        base_amount=payload.base_amount,
-        safety_order_multiplier=payload.safety_order_multiplier,
-        price_deviation=payload.price_deviation,
-        max_safety_orders=payload.max_safety_orders,
+        settings={
+            "base_amount": str(payload.base_amount),
+            "safety_order_multiplier": payload.safety_order_multiplier,
+            "price_deviation": payload.price_deviation,
+            "max_safety_orders": payload.max_safety_orders,
+        },
     )
     db.add(config)
     db.commit()
@@ -72,72 +97,68 @@ def create_dca_config(
     return config
 
 
-@router.get("/dca-configs", response_model=List[DCAConfigResponse])
+@router.get("/dca-configs", response_model=List[StrategyConfigResponse])
 def list_dca_configs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return db.query(DCAConfig).filter(DCAConfig.user_id == current_user.id).all()
+    return (
+        db.query(StrategyConfig)
+        .filter(
+            StrategyConfig.user_id == current_user.id,
+            StrategyConfig.strategy_type == "dca",
+        )
+        .all()
+    )
 
 
-@router.put("/dca-configs/{config_id}", response_model=DCAConfigResponse)
+@router.put("/dca-configs/{config_id}", response_model=StrategyConfigResponse)
 def update_dca_config(
     config_id: int,
     payload: DCAConfigCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    config = (
-        db.query(DCAConfig)
-        .filter(DCAConfig.id == config_id, DCAConfig.user_id == current_user.id)
-        .first()
-    )
-    if config is None:
-        raise HTTPException(status_code=404, detail="DCA config not found")
+    config = _get_config_or_404(config_id, "dca", current_user.id, db)
     if config.is_active:
         raise HTTPException(status_code=400, detail="Cannot update a running bot; stop it first")
 
     config.symbol = payload.symbol
-    config.base_amount = payload.base_amount
-    config.safety_order_multiplier = payload.safety_order_multiplier
-    config.price_deviation = payload.price_deviation
-    config.max_safety_orders = payload.max_safety_orders
+    config.settings = {
+        "base_amount": str(payload.base_amount),
+        "safety_order_multiplier": payload.safety_order_multiplier,
+        "price_deviation": payload.price_deviation,
+        "max_safety_orders": payload.max_safety_orders,
+    }
     db.commit()
     db.refresh(config)
     return config
 
 
-@router.post("/start/{config_id}", response_model=TradeResponse)
+@router.post("/start/{config_id}", response_model=StrategyTradeResponse)
 def start_bot(
     config_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _assert_has_active_subscription(current_user, db)
-    config = (
-        db.query(DCAConfig)
-        .filter(DCAConfig.id == config_id, DCAConfig.user_id == current_user.id)
-        .first()
-    )
-    if config is None:
-        raise HTTPException(status_code=404, detail="DCA config not found")
+    config = _get_config_or_404(config_id, "dca", current_user.id, db)
     if config.is_active:
         raise HTTPException(status_code=400, detail="Bot is already running")
 
-    # Compute the DCA order ladder for informational purposes
     try:
         exchange = exchange_service.get_default_exchange()
         ticker = exchange_service.get_ticker(exchange, config.symbol)
         current_price = ticker["last"]
     except Exception:
-        current_price = 0.0  # graceful degradation when exchange creds not set
+        current_price = 0.0
 
     orders = calculate_dca_orders(
-        base_amount=float(config.base_amount),
+        base_amount=float(config.settings.get("base_amount", 0)),
         current_price=current_price,
-        multiplier=config.safety_order_multiplier,
-        deviation=config.price_deviation,
-        max_orders=config.max_safety_orders,
+        multiplier=config.settings.get("safety_order_multiplier", 2.0),
+        deviation=config.settings.get("price_deviation", 0.04),
+        max_orders=config.settings.get("max_safety_orders", 6),
     )
     safety_orders_data = [
         {
@@ -150,14 +171,17 @@ def start_bot(
         for o in orders
     ]
 
-    trade = Trade(
+    trade = StrategyTrade(
         user_id=current_user.id,
+        config_id=config.id,
+        strategy_type="dca",
         symbol=config.symbol,
         exchange="okx",
-        strategy="dca",
         status="active",
-        base_order_amount=config.base_amount,
-        safety_orders=safety_orders_data,
+        details={
+            "base_order_amount": config.settings.get("base_amount"),
+            "safety_orders": safety_orders_data,
+        },
     )
     db.add(trade)
     config.is_active = 1
@@ -172,24 +196,18 @@ def stop_bot(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    config = (
-        db.query(DCAConfig)
-        .filter(DCAConfig.id == config_id, DCAConfig.user_id == current_user.id)
-        .first()
-    )
-    if config is None:
-        raise HTTPException(status_code=404, detail="DCA config not found")
+    config = _get_config_or_404(config_id, "dca", current_user.id, db)
     if not config.is_active:
         raise HTTPException(status_code=400, detail="Bot is not running")
 
     active_trade = (
-        db.query(Trade)
+        db.query(StrategyTrade)
         .filter(
-            Trade.user_id == current_user.id,
-            Trade.symbol == config.symbol,
-            Trade.status == "active",
+            StrategyTrade.user_id == current_user.id,
+            StrategyTrade.config_id == config.id,
+            StrategyTrade.status == "active",
         )
-        .order_by(Trade.created_at.desc())
+        .order_by(StrategyTrade.created_at.desc())
         .first()
     )
     if active_trade:
@@ -204,7 +222,7 @@ def stop_bot(
 # MACD D1 strategy endpoints
 # ---------------------------------------------------------------------------
 
-@router.post("/macd-configs", response_model=MACDConfigResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/macd-configs", response_model=StrategyConfigResponse, status_code=status.HTTP_201_CREATED)
 def create_macd_config(
     payload: MACDConfigCreate,
     db: Session = Depends(get_db),
@@ -222,12 +240,15 @@ def create_macd_config(
     if payload.margin_per_trade <= 0:
         raise HTTPException(status_code=400, detail="Margin per trade must be positive")
 
-    config = MACDConfig(
+    config = StrategyConfig(
         user_id=current_user.id,
+        strategy_type="macd",
         symbol=payload.symbol,
-        margin_per_trade=payload.margin_per_trade,
-        leverage=payload.leverage,
-        rr_ratio=payload.rr_ratio,
+        settings={
+            "margin_per_trade": str(payload.margin_per_trade),
+            "leverage": payload.leverage,
+            "rr_ratio": payload.rr_ratio,
+        },
     )
     db.add(config)
     db.commit()
@@ -235,13 +256,20 @@ def create_macd_config(
     return config
 
 
-@router.get("/macd-configs", response_model=List[MACDConfigResponse])
+@router.get("/macd-configs", response_model=List[StrategyConfigResponse])
 def list_macd_configs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """List all MACD D1 bot configurations for the current user."""
-    return db.query(MACDConfig).filter(MACDConfig.user_id == current_user.id).all()
+    return (
+        db.query(StrategyConfig)
+        .filter(
+            StrategyConfig.user_id == current_user.id,
+            StrategyConfig.strategy_type == "macd",
+        )
+        .all()
+    )
 
 
 @router.get("/macd-signal/{config_id}", response_model=MACDSignalResponse)
@@ -254,19 +282,12 @@ def get_macd_signal_for_config(
     Fetch current D1 MACD signal from the exchange and return it together with
     the user's daily trade status for the given config.
     """
-    config = (
-        db.query(MACDConfig)
-        .filter(MACDConfig.id == config_id, MACDConfig.user_id == current_user.id)
-        .first()
-    )
-    if config is None:
-        raise HTTPException(status_code=404, detail="MACD config not found")
+    config = _get_config_or_404(config_id, "macd", current_user.id, db)
 
-    # Fetch D1 OHLCV candles from the exchange (need ≥ 60 closes for stable MACD)
     try:
         exchange = exchange_service.get_default_exchange()
         ohlcv = exchange.fetch_ohlcv(config.symbol, timeframe="1d", limit=60)
-        closes = [candle[4] for candle in ohlcv]  # index 4 = close
+        closes = [candle[4] for candle in ohlcv]
     except Exception:
         closes = []
 
@@ -274,16 +295,16 @@ def get_macd_signal_for_config(
 
     today = date.today()
     today_trades = (
-        db.query(MACDTrade)
+        db.query(StrategyTrade)
         .filter(
-            MACDTrade.user_id == current_user.id,
-            MACDTrade.config_id == config_id,
-            MACDTrade.trade_date == today,
+            StrategyTrade.user_id == current_user.id,
+            StrategyTrade.config_id == config_id,
+            StrategyTrade.trade_date == today,
         )
-        .order_by(MACDTrade.created_at.asc())
+        .order_by(StrategyTrade.created_at.asc())
         .all()
     )
-    daily_status = check_daily_trade_status([t.result for t in today_trades])
+    daily_status = check_daily_trade_status([t.status for t in today_trades])
 
     return MACDSignalResponse(
         symbol=config.symbol,
@@ -298,7 +319,7 @@ def get_macd_signal_for_config(
     )
 
 
-@router.post("/macd-open/{config_id}", response_model=MACDTradeResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/macd-open/{config_id}", response_model=StrategyTradeResponse, status_code=status.HTTP_201_CREATED)
 def open_macd_trade(
     config_id: int,
     payload: MACDTradeOpen,
@@ -309,63 +330,64 @@ def open_macd_trade(
     Open a MACD D1 trade.
 
     - Entry #1 uses the D1 MACD signal timeframe.
-    - Entry #2 (after a win or loss) uses the 15 m correction timeframe.
+    - Entry #2 (after a win or loss) uses the 15m correction timeframe.
     - Enforces the daily limit of 2 trades and maximum daily margin.
     """
     _assert_has_active_subscription(current_user, db)
-    config = (
-        db.query(MACDConfig)
-        .filter(MACDConfig.id == config_id, MACDConfig.user_id == current_user.id)
-        .first()
-    )
-    if config is None:
-        raise HTTPException(status_code=404, detail="MACD config not found")
+    config = _get_config_or_404(config_id, "macd", current_user.id, db)
 
     today = date.today()
     today_trades = (
-        db.query(MACDTrade)
+        db.query(StrategyTrade)
         .filter(
-            MACDTrade.user_id == current_user.id,
-            MACDTrade.config_id == config_id,
-            MACDTrade.trade_date == today,
+            StrategyTrade.user_id == current_user.id,
+            StrategyTrade.config_id == config_id,
+            StrategyTrade.trade_date == today,
         )
-        .order_by(MACDTrade.created_at.asc())
+        .order_by(StrategyTrade.created_at.asc())
         .all()
     )
-    daily_status = check_daily_trade_status([t.result for t in today_trades])
+    daily_status = check_daily_trade_status([t.status for t in today_trades])
 
     if not daily_status.can_open_trade:
         raise HTTPException(status_code=400, detail=daily_status.reason)
 
     entry_number = daily_status.next_entry_number
-    # Entry #1 → D1 signal; Entry #2 → 15 m recovery / follow-up
     timeframe = "d1" if entry_number == 1 else "15m"
+
+    margin = float(config.settings.get("margin_per_trade", 0))
+    leverage = float(config.settings.get("leverage", 20.0))
+    rr_ratio = float(config.settings.get("rr_ratio", 2.0))
 
     tp = calculate_take_profit(
         entry_price=payload.entry_price,
-        margin=float(config.margin_per_trade),
-        leverage=config.leverage,
-        rr_ratio=config.rr_ratio,
+        margin=margin,
+        leverage=leverage,
+        rr_ratio=rr_ratio,
     )
     sl = calculate_stop_loss(
         entry_price=payload.entry_price,
-        margin=float(config.margin_per_trade),
-        leverage=config.leverage,
+        margin=margin,
+        leverage=leverage,
     )
 
-    trade = MACDTrade(
+    trade = StrategyTrade(
         user_id=current_user.id,
         config_id=config.id,
+        strategy_type="macd",
         symbol=config.symbol,
-        timeframe=timeframe,
-        entry_number=entry_number,
-        entry_price=payload.entry_price,
-        take_profit_price=tp,
-        stop_loss_price=sl,
-        margin=config.margin_per_trade,
-        leverage=config.leverage,
-        result="open",
+        exchange="okx",
+        status="open",
         trade_date=today,
+        details={
+            "timeframe": timeframe,
+            "entry_number": entry_number,
+            "entry_price": str(payload.entry_price),
+            "take_profit_price": str(tp),
+            "stop_loss_price": str(sl),
+            "margin": config.settings.get("margin_per_trade"),
+            "leverage": leverage,
+        },
     )
     db.add(trade)
     db.commit()
@@ -373,47 +395,49 @@ def open_macd_trade(
     return trade
 
 
-@router.post("/macd-close/{trade_id}", response_model=MACDTradeResponse)
+@router.post("/macd-close/{trade_id}", response_model=StrategyTradeResponse)
 def close_macd_trade(
     trade_id: int,
     payload: MACDTradeClose,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Close an open MACD trade and record the result ('win' or 'loss').
-
-    On a loss the full margin is lost (1:2 R:R enforced in the frontend).
-    On a win 2× the margin is gained.
-    """
+    """Close an open MACD trade and record the result ('win' or 'loss')."""
     if payload.result not in ("win", "loss"):
         raise HTTPException(status_code=400, detail="result must be 'win' or 'loss'")
 
     trade = (
-        db.query(MACDTrade)
-        .filter(MACDTrade.id == trade_id, MACDTrade.user_id == current_user.id)
+        db.query(StrategyTrade)
+        .filter(
+            StrategyTrade.id == trade_id,
+            StrategyTrade.user_id == current_user.id,
+            StrategyTrade.strategy_type == "macd",
+        )
         .first()
     )
     if trade is None:
         raise HTTPException(status_code=404, detail="MACD trade not found")
-    if trade.result != "open":
+    if trade.status != "open":
         raise HTTPException(status_code=400, detail="Trade is already closed")
 
-    trade.result = payload.result
+    trade.status = payload.result
     db.commit()
     db.refresh(trade)
     return trade
 
 
-@router.get("/macd-trades", response_model=List[MACDTradeResponse])
+@router.get("/macd-trades", response_model=List[StrategyTradeResponse])
 def list_macd_trades(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """List all MACD trades for the current user, most recent first."""
     return (
-        db.query(MACDTrade)
-        .filter(MACDTrade.user_id == current_user.id)
-        .order_by(MACDTrade.created_at.desc())
+        db.query(StrategyTrade)
+        .filter(
+            StrategyTrade.user_id == current_user.id,
+            StrategyTrade.strategy_type == "macd",
+        )
+        .order_by(StrategyTrade.created_at.desc())
         .all()
     )
