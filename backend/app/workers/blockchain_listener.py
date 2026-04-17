@@ -53,7 +53,10 @@ _USDT_ABI = json.loads(
     '"payable":false,"stateMutability":"view","type":"function"}]'
 )
 
-_LAST_PROCESSED_BLOCK: int = 0   # module-level state; updated each poll cycle
+# Protected state: last block processed by the listener.
+# Guarded by _state_lock so that concurrent coroutines don't race.
+_state_lock = asyncio.Lock()
+_last_processed_block: int = 0
 
 
 def _get_managed_addresses(db) -> set:
@@ -92,13 +95,15 @@ async def blockchain_listener_loop() -> None:
 
     # Start from the current chain tip on first run
     try:
-        _LAST_PROCESSED_BLOCK = w3.eth.block_number - 1
+        async with _state_lock:
+            global _last_processed_block
+            _last_processed_block = w3.eth.block_number - 1
     except Exception as exc:
         log.error("Cannot connect to Ethereum node: %s", exc)
         return
 
     log.info("Blockchain listener started. Watching USDT at %s from block %d",
-             settings.USDT_CONTRACT_ADDRESS, _LAST_PROCESSED_BLOCK)
+             settings.USDT_CONTRACT_ADDRESS, _last_processed_block)
 
     while True:
         await asyncio.sleep(settings.BLOCKCHAIN_POLL_INTERVAL)
@@ -113,7 +118,7 @@ async def _poll_transfers(w3: Web3, usdt, divisor: Decimal) -> None:
     Fetch all USDT Transfer events in the new blocks since the last poll,
     check if the recipient is a managed deposit address, and credit the wallet.
     """
-    global _LAST_PROCESSED_BLOCK
+    global _last_processed_block
 
     try:
         latest = w3.eth.block_number
@@ -121,17 +126,20 @@ async def _poll_transfers(w3: Web3, usdt, divisor: Decimal) -> None:
         log.warning("Could not fetch latest block: %s", exc)
         return
 
-    if latest <= _LAST_PROCESSED_BLOCK:
+    async with _state_lock:
+        from_block = _last_processed_block + 1
+
+    if latest < from_block:
         return  # No new blocks
 
-    from_block = _LAST_PROCESSED_BLOCK + 1
     to_block = latest
 
     db = SessionLocal()
     try:
         managed = _get_managed_addresses(db)
         if not managed:
-            _LAST_PROCESSED_BLOCK = to_block
+            async with _state_lock:
+                _last_processed_block = to_block
             return
 
         # Fetch Transfer events for the block range
@@ -168,7 +176,8 @@ async def _poll_transfers(w3: Web3, usdt, divisor: Decimal) -> None:
             if confirmed:
                 log.info("Credited %s USDT to wallet (tx: %s)", amount, tx_hash)
 
-        _LAST_PROCESSED_BLOCK = to_block
+        async with _state_lock:
+            _last_processed_block = to_block
 
     finally:
         db.close()

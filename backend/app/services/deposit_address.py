@@ -14,6 +14,11 @@ from eth_account.hdaccount import generate_mnemonic
 from app.core.config import settings
 
 Account.enable_unaudited_hdwallet_features()
+# NOTE: The HD wallet features in eth_account are marked as "unaudited" by the
+# library maintainers.  In production, ensure you are running a recent,
+# audited version of eth_account and protect HD_WALLET_SEED with a secure
+# secrets manager (e.g., HashiCorp Vault, AWS Secrets Manager).
+# Never store the seed in plaintext or version control.
 
 
 def derive_deposit_address(user_id: int) -> str:

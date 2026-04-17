@@ -29,7 +29,7 @@ export default function BottomNav() {
             ) : (
               <div className="text-[20px]">{item.icon}</div>
             )}
-            <span className={`text-[10px] font-${active ? '600' : '400'} ${active ? 'text-[#a78bfa]' : 'text-[#555]'}`}>
+            <span className={active ? 'text-[10px] font-semibold text-[#a78bfa]' : 'text-[10px] font-normal text-[#555]'}>
               {item.label}
             </span>
           </div>

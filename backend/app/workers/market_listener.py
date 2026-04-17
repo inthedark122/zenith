@@ -39,7 +39,10 @@ from app.services.macd_strategy import MACDSignal, get_macd_signal
 log = logging.getLogger(__name__)
 
 # Shared cache: symbol → latest MACDSignal (None until first successful fetch)
+# Protected by _signals_lock for writes; readers may read without locking since
+# Python dict assignment is atomic (GIL) and stale reads are acceptable here.
 LATEST_SIGNALS: Dict[str, Optional[MACDSignal]] = {s: None for s in MACD_ALLOWED_SYMBOLS}
+_signals_lock = asyncio.Lock()
 
 # How often to re-poll market data (seconds)
 MARKET_POLL_INTERVAL: int = settings.MARKET_POLL_INTERVAL
@@ -64,7 +67,8 @@ async def _refresh_macd_signals() -> None:
             )
             closes = [candle[4] for candle in ohlcv]
             signal = get_macd_signal(closes) if len(closes) >= 35 else None
-            LATEST_SIGNALS[symbol] = signal
+            async with _signals_lock:
+                LATEST_SIGNALS[symbol] = signal
             if signal:
                 log.debug(
                     "%s MACD signal updated: macd=%.4f signal=%.4f bull=%s bear=%s",

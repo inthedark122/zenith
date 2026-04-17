@@ -29,7 +29,9 @@ class ExchangeService:
                 "secret": api_secret,
                 "password": passphrase,  # OKX uses 'password' as passphrase field
                 "enableRateLimit": True,
-                "options": {"defaultType": "swap"},  # perpetual futures by default
+                # Default to spot trading; MACD strategy endpoints request swap
+                # (perpetual futures) via the 'options' override when needed.
+                "options": {"defaultType": "spot"},
             }
         )
         return exchange

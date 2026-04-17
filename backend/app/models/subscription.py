@@ -1,17 +1,21 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, Numeric, String
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Integer, JSON, Numeric, String
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
 
 # Valid plan codes and their properties
+PLAN_CODES = ("starter", "trader", "pro")
 PLAN_COINS = {"starter": 1, "trader": 2, "pro": 3}
 PLAN_PRICES_MAP = {"starter": "15.00", "trader": "20.00", "pro": "25.00"}
 
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
+    __table_args__ = (
+        CheckConstraint("plan IN ('starter', 'trader', 'pro')", name="ck_subscription_plan"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -25,4 +29,6 @@ class Subscription(Base):
 
     user = relationship("User", back_populates="subscriptions")
     commission_payments = relationship("CommissionPayment", back_populates="subscription")
+
+
 
