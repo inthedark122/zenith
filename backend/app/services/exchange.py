@@ -1,5 +1,10 @@
 """
-Exchange service wrapping ccxt for spot trading on OKX (and other exchanges).
+Exchange service wrapping ccxt for spot/futures trading.
+
+Users may connect their own exchange credentials via the /exchanges API.
+The `get_user_exchange` helper resolves the right credentials from the DB;
+`get_default_exchange` falls back to server-level OKX credentials for
+market-data-only calls (e.g. OHLCV fetches in the MACD signal endpoint).
 """
 from typing import Any, Dict, Optional
 
@@ -13,7 +18,7 @@ class ExchangeService:
         self,
         api_key: str,
         api_secret: str,
-        passphrase: str,
+        passphrase: str = "",
         exchange_id: str = "okx",
     ) -> ccxt.Exchange:
         """Instantiate and return an authenticated ccxt exchange object."""
@@ -24,17 +29,37 @@ class ExchangeService:
                 "secret": api_secret,
                 "password": passphrase,  # OKX uses 'password' as passphrase field
                 "enableRateLimit": True,
-                "options": {"defaultType": "spot"},
+                "options": {"defaultType": "swap"},  # perpetual futures by default
             }
         )
         return exchange
 
     def get_default_exchange(self) -> ccxt.Exchange:
-        """Return an exchange authenticated with the server-level OKX credentials."""
+        """
+        Return an exchange authenticated with the server-level OKX credentials.
+        Used only for public market-data calls (OHLCV, ticker) when no user
+        credentials are available.
+        """
         return self.get_exchange(
             api_key=settings.OKX_API_KEY,
             api_secret=settings.OKX_API_SECRET,
             passphrase=settings.OKX_PASSPHRASE,
+            exchange_id="okx",
+        )
+
+    def get_user_exchange(self, user_exchange) -> ccxt.Exchange:
+        """
+        Build a ccxt exchange object from a UserExchange ORM row.
+        Raises ValueError if the exchange_id is not supported by ccxt.
+        """
+        exchange_id = user_exchange.exchange_id
+        if not hasattr(ccxt, exchange_id):
+            raise ValueError(f"Unsupported exchange: {exchange_id}")
+        return self.get_exchange(
+            api_key=user_exchange.api_key,
+            api_secret=user_exchange.api_secret,
+            passphrase=user_exchange.passphrase or "",
+            exchange_id=exchange_id,
         )
 
     def get_ticker(self, exchange: ccxt.Exchange, symbol: str) -> Dict[str, Any]:
@@ -96,3 +121,4 @@ class ExchangeService:
 
 
 exchange_service = ExchangeService()
+

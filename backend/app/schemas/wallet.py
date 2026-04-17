@@ -10,6 +10,7 @@ class WalletResponse(BaseModel):
     user_id: int
     currency: str
     balance: Decimal
+    deposit_address: Optional[str]
     created_at: datetime
     updated_at: datetime
 
@@ -31,3 +32,4 @@ class TransactionResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+

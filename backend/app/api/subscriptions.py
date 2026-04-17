@@ -9,6 +9,7 @@ from app.core.deps import get_current_user, get_db
 from app.models.subscription import Subscription
 from app.models.user import User
 from app.schemas.subscription import (
+    PLAN_COINS,
     PLAN_PRICES,
     SubscriptionCreate,
     SubscriptionResponse,
@@ -24,9 +25,9 @@ SUBSCRIPTION_DURATION_DAYS = 30
 @router.get("/plans")
 def list_plans():
     return [
-        {"plan": 1, "coins": 1, "price": 15, "description": "1 trading coin"},
-        {"plan": 2, "coins": 2, "price": 20, "description": "2 trading coins"},
-        {"plan": 3, "coins": 3, "price": 25, "description": "3 trading coins"},
+        {"plan": "starter", "coins": 1, "price": 15, "description": "1 trading coin"},
+        {"plan": "trader",  "coins": 2, "price": 20, "description": "2 trading coins"},
+        {"plan": "pro",     "coins": 3, "price": 25, "description": "3 trading coins"},
     ]
 
 
@@ -53,7 +54,7 @@ def create_subscription(
     now = datetime.utcnow()
     sub = Subscription(
         user_id=current_user.id,
-        plan=int(payload.plan),
+        plan=payload.plan.value,
         price=price,
         status="active",
         started_at=now,
@@ -98,3 +99,4 @@ def cancel_subscription(
         raise HTTPException(status_code=404, detail="Subscription not found")
     sub.status = "expired"
     db.commit()
+

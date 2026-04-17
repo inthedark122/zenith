@@ -6,13 +6,23 @@ from typing import List, Optional
 from pydantic import BaseModel, field_validator
 
 
-class SubscriptionPlan(int, Enum):
-    ONE_COIN = 1
-    TWO_COINS = 2
-    THREE_COINS = 3
+class SubscriptionPlan(str, Enum):
+    STARTER = "starter"   # 1 coin, $15
+    TRADER = "trader"     # 2 coins, $20
+    PRO = "pro"           # 3 coins, $25
 
 
-PLAN_PRICES = {1: Decimal("15.00"), 2: Decimal("20.00"), 3: Decimal("25.00")}
+PLAN_COINS = {
+    SubscriptionPlan.STARTER: 1,
+    SubscriptionPlan.TRADER: 2,
+    SubscriptionPlan.PRO: 3,
+}
+
+PLAN_PRICES = {
+    SubscriptionPlan.STARTER: Decimal("15.00"),
+    SubscriptionPlan.TRADER: Decimal("20.00"),
+    SubscriptionPlan.PRO: Decimal("25.00"),
+}
 
 
 class SubscriptionCreate(BaseModel):
@@ -23,15 +33,17 @@ class SubscriptionCreate(BaseModel):
     @classmethod
     def validate_coins_length(cls, v, info):
         plan = info.data.get("plan")
-        if plan and len(v) != int(plan):
-            raise ValueError(f"Plan {plan} requires exactly {int(plan)} coin(s)")
+        if plan:
+            expected = PLAN_COINS[plan]
+            if len(v) != expected:
+                raise ValueError(f"Plan '{plan}' requires exactly {expected} coin(s)")
         return v
 
 
 class SubscriptionResponse(BaseModel):
     id: int
     user_id: int
-    plan: int
+    plan: str
     price: Decimal
     status: str
     started_at: Optional[datetime]
@@ -40,3 +52,4 @@ class SubscriptionResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+

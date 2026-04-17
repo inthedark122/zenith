@@ -5,13 +5,17 @@ from sqlalchemy.orm import relationship
 
 from app.db.base import Base
 
+# Valid plan codes and their properties
+PLAN_COINS = {"starter": 1, "trader": 2, "pro": 3}
+PLAN_PRICES_MAP = {"starter": "15.00", "trader": "20.00", "pro": "25.00"}
+
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    plan = Column(Integer, nullable=False)          # 1, 2, or 3 coins
+    plan = Column(String, nullable=False)           # "starter" | "trader" | "pro"
     price = Column(Numeric(10, 2), nullable=False)  # 15, 20, or 25 USD
     status = Column(String, default="pending")      # pending / active / expired
     started_at = Column(DateTime, nullable=True)
@@ -21,3 +25,4 @@ class Subscription(Base):
 
     user = relationship("User", back_populates="subscriptions")
     commission_payments = relationship("CommissionPayment", back_populates="subscription")
+

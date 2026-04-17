@@ -8,59 +8,34 @@ const navItems = [
   { icon: '👤', label: 'User', path: '/user' },
 ]
 
-const s = {
-  nav: {
-    position: 'fixed',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    background: '#111',
-    borderTop: '1px solid #222',
-    display: 'flex',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    padding: '8px 0 calc(8px + env(safe-area-inset-bottom))',
-    zIndex: 100,
-  },
-  item: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', cursor: 'pointer', minWidth: '56px' },
-  icon: (active, center) => ({
-    fontSize: center ? '22px' : '20px',
-    ...(center
-      ? {
-          background: 'linear-gradient(135deg, #6c47ff 0%, #a78bfa 100%)',
-          width: '52px',
-          height: '52px',
-          borderRadius: '50%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginTop: '-20px',
-          boxShadow: '0 4px 20px rgba(108,71,255,0.5)',
-        }
-      : {}),
-  }),
-  label: (active) => ({ fontSize: '10px', color: active ? '#a78bfa' : '#555', fontWeight: active ? '600' : '400' }),
-}
-
 export default function BottomNav() {
   const navigate = useNavigate()
   const location = useLocation()
 
   return (
-    <nav style={s.nav}>
+    <nav className="fixed bottom-0 left-0 right-0 bg-[#111] border-t border-[#222] flex justify-around items-center px-0 py-2 pb-[calc(8px+env(safe-area-inset-bottom))] z-[100]">
       {navItems.map((item) => {
         const active = location.pathname === item.path
         return (
           <div
             key={item.label}
-            style={s.item}
+            className="flex flex-col items-center gap-[3px] cursor-pointer min-w-[56px]"
             onClick={() => item.path !== '#' && navigate(item.path)}
           >
-            <div style={s.icon(active, item.center)}>{item.icon}</div>
-            <div style={s.label(active)}>{item.label}</div>
+            {item.center ? (
+              <div className="text-[22px] bg-gradient-to-br from-[#6c47ff] to-[#a78bfa] w-[52px] h-[52px] rounded-full flex items-center justify-center -mt-5 shadow-[0_4px_20px_rgba(108,71,255,0.5)]">
+                {item.icon}
+              </div>
+            ) : (
+              <div className="text-[20px]">{item.icon}</div>
+            )}
+            <span className={`text-[10px] font-${active ? '600' : '400'} ${active ? 'text-[#a78bfa]' : 'text-[#555]'}`}>
+              {item.label}
+            </span>
           </div>
         )
       })}
     </nav>
   )
 }
+

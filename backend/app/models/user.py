@@ -27,5 +27,6 @@ class User(Base):
     referrer = relationship("User", remote_side=[id], backref="referrals")
     subscriptions = relationship("Subscription", back_populates="user")
     wallet = relationship("Wallet", back_populates="user", uselist=False)
+    exchanges = relationship("UserExchange", back_populates="user")
     strategy_configs = relationship("StrategyConfig", back_populates="user")
     strategy_trades = relationship("StrategyTrade", back_populates="user")

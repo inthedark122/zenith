@@ -279,19 +279,29 @@ def get_macd_signal_for_config(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Fetch current D1 MACD signal from the exchange and return it together with
-    the user's daily trade status for the given config.
+    Return the latest D1 MACD signal for the given config.
+
+    The signal is served from the in-memory cache maintained by the
+    market_listener background worker (see workers/market_listener.py).
+    If the cache is empty (e.g. worker hasn't run yet) it falls back to a
+    live exchange fetch so the endpoint always returns useful data.
     """
+    from app.workers.market_listener import LATEST_SIGNALS
+
     config = _get_config_or_404(config_id, "macd", current_user.id, db)
 
-    try:
-        exchange = exchange_service.get_default_exchange()
-        ohlcv = exchange.fetch_ohlcv(config.symbol, timeframe="1d", limit=60)
-        closes = [candle[4] for candle in ohlcv]
-    except Exception:
-        closes = []
+    # Try the worker cache first
+    signal = LATEST_SIGNALS.get(config.symbol)
 
-    signal = get_macd_signal(closes) if len(closes) >= 35 else None
+    # Fall back to a live fetch if the worker hasn't populated the cache yet
+    if signal is None:
+        try:
+            exchange = exchange_service.get_default_exchange()
+            ohlcv = exchange.fetch_ohlcv(config.symbol, timeframe="1d", limit=60)
+            closes = [candle[4] for candle in ohlcv]
+            signal = get_macd_signal(closes) if len(closes) >= 35 else None
+        except Exception:
+            signal = None
 
     today = date.today()
     today_trades = (
@@ -317,6 +327,7 @@ def get_macd_signal_for_config(
         next_entry_number=daily_status.next_entry_number,
         daily_status_reason=daily_status.reason,
     )
+
 
 
 @router.post("/macd-open/{config_id}", response_model=StrategyTradeResponse, status_code=status.HTTP_201_CREATED)
