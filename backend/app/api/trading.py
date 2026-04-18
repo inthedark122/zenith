@@ -21,7 +21,7 @@ Subscription restrictions
   (starter → 1 token, trader → 2 tokens, pro → 3 tokens).
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional
 
@@ -81,6 +81,7 @@ def _get_strategy_or_404(strategy_id: int, db: Session) -> Strategy:
 
 
 def _resolve_user_exchange(user_id: int, db: Session) -> Optional[UserExchange]:
+    """Return the user's default exchange; falls back to the oldest if no default is set."""
     return (
         db.query(UserExchange)
         .filter(UserExchange.user_id == user_id)
@@ -138,7 +139,6 @@ def get_signal(
         except Exception:
             signal = None
 
-    from datetime import date
     today = date.today()
     today_trades = (
         db.query(StrategyTrade)

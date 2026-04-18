@@ -198,13 +198,18 @@ def check_daily_trade_status(
                 reason="First trade still open — close it before opening entry #2",
             )
         if result in ("win", "loss", "closed"):
-            # "closed" means force-stopped — treated as a completed entry
-            label = "follow-up" if result == "win" else "recovery (15 m correction)"
+            # "closed" means force-stopped by the user; treated as a completed entry
+            if result == "win":
+                label = "follow-up"
+            elif result == "loss":
+                label = "recovery (15 m correction)"
+            else:
+                label = "recovery (15 m correction) — previous trade was force-closed"
             return DailyTradeStatus(
                 trades_today=1,
                 can_open_trade=True,
                 next_entry_number=2,
-                reason=f"Entry #1 was a {result} — {label} entry #2 available",
+                reason=f"Entry #1 {result} — {label} entry #2 available",
             )
 
     # 2 or more trades have been opened today

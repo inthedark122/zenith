@@ -100,7 +100,13 @@ class ExchangeService:
         """Place an order on the exchange.  price is required for limit orders."""
         if order_type == "limit" and price is None:
             raise ValueError("Price is required for limit orders")
-        return self.exchange.create_order(symbol, order_type, side, amount, price)
+        return self.exchange.create_order(
+            symbol=symbol,
+            type=order_type,
+            side=side,
+            amount=amount,
+            price=price,
+        )
 
     def get_open_orders(self, symbol: str) -> list:
         """Return all open orders for a symbol."""
