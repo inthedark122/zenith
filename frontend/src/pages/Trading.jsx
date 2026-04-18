@@ -116,7 +116,9 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
             <span className="text-[#888] text-xs">D1 Cross</span>
             {signal.is_bullish_crossover
               ? <span className="text-[#34d399] text-xs font-bold">🟢 Bullish — LONG ready</span>
-              : <span className="text-[#888] text-xs font-semibold">No crossover</span>}
+              : signal.is_bearish_crossover
+                ? <span className="text-[#f87171] text-xs font-bold">🔴 Bearish — avoid longs</span>
+                : <span className="text-[#888] text-xs font-semibold">No crossover</span>}
           </div>
           <div className="flex justify-between">
             <span className="text-[#888] text-xs">Today</span>

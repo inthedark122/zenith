@@ -90,9 +90,16 @@ def run_for_worker(
 
         # Check daily margin cap
         if strategy.max_daily_margin_usd > 0:
-            used = sum(
-                float(t.details.get("margin", 0)) for t in today_trades
-            )
+            used = 0.0
+            for t in today_trades:
+                raw = t.details.get("margin")
+                if raw is None:
+                    log.warning(
+                        "Worker #%d: trade #%d has no margin in details — skipping for cap calc",
+                        worker.id, t.id,
+                    )
+                    continue
+                used += float(raw)
             if used + margin > strategy.max_daily_margin_usd:
                 log.debug(
                     "Worker #%d/%s: daily margin cap reached (%.2f/%.2f)",
@@ -100,13 +107,11 @@ def run_for_worker(
                 )
                 continue
 
-        # Only open on a fresh D1 bullish crossover
+        # Only open on a fresh D1 bullish crossover for entry #1
         entry_number = daily_status.next_entry_number
         if entry_number == 1 and not signal.is_bullish_crossover:
             continue
-        # Entry #2 (recovery / follow-up) uses 15 m — don't require a D1 cross
-        if entry_number > strategy.max_daily_trades:
-            continue
+        # Entry #2 (recovery / follow-up) uses 15 m — no D1 cross required
 
         # We need a current price to compute TP/SL
         current_price = current_prices.get(symbol)

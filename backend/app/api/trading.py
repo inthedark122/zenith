@@ -227,8 +227,9 @@ def launch_worker(
         )
 
     # --- Subscription plan: symbol access ---
+    # An empty coins list means the plan has unrestricted symbol access (e.g. pro).
     sub_coins = sub.coins or []
-    if sub_coins:  # if the subscription restricts coins
+    if sub_coins:  # non-empty → subscription is restricted to specific coins
         allowed = set(sub_coins)
         strategy_symbols = set(strategy.symbols or [])
         if not strategy_symbols.intersection(allowed):
@@ -268,8 +269,6 @@ def stop_worker(
     current_user: User = Depends(get_current_user),
 ):
     """Stop a running strategy worker. Open trades are NOT force-closed."""
-    from datetime import datetime
-
     worker = (
         db.query(StrategyWorker)
         .filter(

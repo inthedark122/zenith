@@ -66,7 +66,7 @@ def _collect_symbols(db) -> set:
     strategies = db.query(Strategy).filter(Strategy.is_active).all()
     symbols: set = set()
     for s in strategies:
-        for sym in (s.symbols or []):
+        for sym in s.symbols or []:
             symbols.add(sym)
     return symbols
 
