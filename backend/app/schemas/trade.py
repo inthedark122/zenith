@@ -4,16 +4,12 @@ from typing import Any, Dict, Optional
 from pydantic import BaseModel
 
 
-# ---------------------------------------------------------------------------
-# Unified trade response
-# ---------------------------------------------------------------------------
-
 class StrategyTradeResponse(BaseModel):
     """Response for any strategy trade. All trade-specific data is under ``details``."""
     id: int
     user_id: int
+    worker_id: Optional[int]
     strategy_id: Optional[int]
-    strategy_type: str
     symbol: str
     exchange: str
     status: str
@@ -23,28 +19,6 @@ class StrategyTradeResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
-
-
-# ---------------------------------------------------------------------------
-# MACD trade — request schemas
-# ---------------------------------------------------------------------------
-
-class MACDTradeLaunchRequest(BaseModel):
-    """
-    User-facing trade launch payload.
-
-    Users supply only what they control:
-    - strategy_id — which admin-predefined strategy to use
-    - margin      — USDT margin to risk (validated ≤ wallet balance)
-    - entry_price — current mark price (used to compute TP/SL levels)
-    """
-    strategy_id: int
-    margin: float
-    entry_price: float
-
-
-class MACDTradeClose(BaseModel):
-    result: str   # 'win' or 'loss'
 
 
 class MACDSignalResponse(BaseModel):

@@ -1,16 +1,14 @@
 """
 Exchange service wrapping ccxt for spot/futures trading.
 
-Users may connect their own exchange credentials via the /exchanges API.
-The `get_user_exchange` helper resolves the right credentials from the DB;
-`get_default_exchange` falls back to server-level OKX credentials for
-market-data-only calls (e.g. OHLCV fetches in the MACD signal endpoint).
+Users connect their own exchange credentials via the /exchanges API.
+``get_default_exchange`` returns an unauthenticated OKX instance for
+public market-data calls (OHLCV, ticker); OKX supports these without
+API credentials.
 """
 from typing import Any, Dict, Optional
 
 import ccxt
-
-from app.core.config import settings
 
 
 class ExchangeService:
@@ -27,10 +25,8 @@ class ExchangeService:
             {
                 "apiKey": api_key,
                 "secret": api_secret,
-                "password": passphrase,  # OKX uses 'password' as passphrase field
+                "password": passphrase,
                 "enableRateLimit": True,
-                # Default to spot trading; MACD strategy endpoints request swap
-                # (perpetual futures) via the 'options' override when needed.
                 "options": {"defaultType": "spot"},
             }
         )
@@ -38,16 +34,11 @@ class ExchangeService:
 
     def get_default_exchange(self) -> ccxt.Exchange:
         """
-        Return an exchange authenticated with the server-level OKX credentials.
-        Used only for public market-data calls (OHLCV, ticker) when no user
-        credentials are available.
+        Return an unauthenticated OKX exchange for public market-data calls
+        (OHLCV, ticker).  OKX does not require API credentials for these.
         """
-        return self.get_exchange(
-            api_key=settings.OKX_API_KEY,
-            api_secret=settings.OKX_API_SECRET,
-            passphrase=settings.OKX_PASSPHRASE,
-            exchange_id="okx",
-        )
+        exchange: ccxt.Exchange = ccxt.okx({"enableRateLimit": True})
+        return exchange
 
     def get_user_exchange(self, user_exchange) -> ccxt.Exchange:
         """

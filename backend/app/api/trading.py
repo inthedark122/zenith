@@ -1,19 +1,27 @@
 """
-Trading API (MACD D1 — user-facing)
-=====================================
+Trading API — user-facing
+==========================
 
 Design
 ------
-* Admin creates predefined ``AdminStrategy`` records via /admin/strategies.
+* Admin defines Strategy templates via /admin/strategies.
 * Users browse active strategies via GET /trading/strategies.
-* Users launch a trade by providing only:
-    - strategy_id  — which admin-defined strategy to use
-    - margin       — how much USDT to risk (validated ≤ wallet balance)
-* All other parameters (leverage, rr_ratio, symbol, exchange) come from the
-  AdminStrategy record or the user's connected exchange — nothing is
-  hardcoded.
+* Users start a StrategyWorker via POST /trading/launch (supplying only margin).
+  The worker runs autonomously — it opens and closes trades without user input.
+* Users can stop a running worker via POST /trading/stop/{worker_id}.
+* GET /trading/workers   — lists the user's workers.
+* GET /trading/trades    — read-only trade history (created only by workers).
+* GET /trading/signal/{strategy_id} — cached D1 MACD signal.
+
+Subscription restrictions
+--------------------------
+* Users must have an active subscription to start a worker.
+* ``starter`` plan → max 1 running worker, symbols limited to subscription.coins
+* ``trader``  plan → max 2 running workers
+* ``pro``     plan → max 3 running workers (unrestricted symbols)
 """
-from datetime import date, datetime
+
+from datetime import date
 from decimal import Decimal
 from typing import List
 
@@ -22,28 +30,31 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user, get_db
 from app.models.exchange import UserExchange
-from app.models.strategy import AdminStrategy
+from app.models.strategy import Strategy
 from app.models.subscription import Subscription
 from app.models.trade import StrategyTrade
 from app.models.user import User
 from app.models.wallet import Wallet
-from app.schemas.strategy import AdminStrategyResponse
-from app.schemas.trade import (
-    MACDSignalResponse,
-    MACDTradeClose,
-    MACDTradeLaunchRequest,
-    StrategyTradeResponse,
-)
+from app.models.worker import StrategyWorker
+from app.schemas.strategy import StrategyResponse
+from app.schemas.trade import MACDSignalResponse, StrategyTradeResponse
+from app.schemas.worker import WorkerLaunchRequest, WorkerResponse
 from app.services.exchange import exchange_service
-from app.services.macd_strategy import (
-    calculate_stop_loss,
-    calculate_take_profit,
-    check_daily_trade_status,
-    get_macd_signal,
-)
+from app.services.macd_strategy import check_daily_trade_status, get_macd_signal
 
 router = APIRouter(prefix="/trading", tags=["trading"])
 
+# Concurrent worker limits per plan
+_PLAN_MAX_WORKERS = {
+    "starter": 1,
+    "trader": 2,
+    "pro": 3,
+}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _get_active_subscription_or_403(user: User, db: Session) -> Subscription:
     sub = (
@@ -59,10 +70,10 @@ def _get_active_subscription_or_403(user: User, db: Session) -> Subscription:
     return sub
 
 
-def _get_strategy_or_404(strategy_id: int, db: Session) -> AdminStrategy:
+def _get_strategy_or_404(strategy_id: int, db: Session) -> Strategy:
     strategy = (
-        db.query(AdminStrategy)
-        .filter(AdminStrategy.id == strategy_id, AdminStrategy.is_active)
+        db.query(Strategy)
+        .filter(Strategy.id == strategy_id, Strategy.is_active)
         .first()
     )
     if strategy is None:
@@ -71,14 +82,6 @@ def _get_strategy_or_404(strategy_id: int, db: Session) -> AdminStrategy:
 
 
 def _resolve_exchange_id(user_id: int, db: Session) -> str:
-    """
-    Return the exchange_id to record on the trade.
-
-    Preference order:
-    1. The user's default connected exchange.
-    2. Any connected exchange (first by created_at).
-    3. Falls back to "okx" if the user has not connected any exchange yet.
-    """
     exc = (
         db.query(UserExchange)
         .filter(UserExchange.user_id == user_id)
@@ -89,25 +92,25 @@ def _resolve_exchange_id(user_id: int, db: Session) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Public strategy listing (users browse available strategies)
+# Strategy listing
 # ---------------------------------------------------------------------------
 
-@router.get("/strategies", response_model=List[AdminStrategyResponse])
+@router.get("/strategies", response_model=List[StrategyResponse])
 def list_active_strategies(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return all active strategy templates that users can trade."""
+    """Return all active strategy templates that users can activate."""
     return (
-        db.query(AdminStrategy)
-        .filter(AdminStrategy.is_active)
-        .order_by(AdminStrategy.id.asc())
+        db.query(Strategy)
+        .filter(Strategy.is_active)
+        .order_by(Strategy.id.asc())
         .all()
     )
 
 
 # ---------------------------------------------------------------------------
-# MACD signal (live + worker cache)
+# MACD signal (worker cache + live fallback)
 # ---------------------------------------------------------------------------
 
 @router.get("/signal/{strategy_id}", response_model=MACDSignalResponse)
@@ -117,30 +120,34 @@ def get_signal(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Return the latest D1 MACD signal for a strategy's symbol.
+    Return the latest D1 MACD signal for the first symbol of the strategy.
 
-    Served from the market-listener worker cache when available;
-    falls back to a live exchange fetch otherwise.
+    Served from the market-listener worker cache; falls back to a live fetch.
     """
     from app.workers.market_listener import LATEST_SIGNALS
 
     strategy = _get_strategy_or_404(strategy_id, db)
+    symbols = strategy.symbols or []
+    # Use the first symbol as the representative signal
+    symbol = symbols[0] if symbols else None
 
-    signal = LATEST_SIGNALS.get(strategy.symbol)
-    if signal is None:
+    signal = LATEST_SIGNALS.get(symbol) if symbol else None
+    if signal is None and symbol:
         try:
             exchange = exchange_service.get_default_exchange()
-            ohlcv = exchange.fetch_ohlcv(strategy.symbol, timeframe="1d", limit=60)
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe="1d", limit=60)
             closes = [candle[4] for candle in ohlcv]
             signal = get_macd_signal(closes) if len(closes) >= 35 else None
         except Exception:
             signal = None
 
+    # Daily trade status for the user across this strategy today
     today = date.today()
     today_trades = (
         db.query(StrategyTrade)
+        .join(StrategyWorker, StrategyTrade.worker_id == StrategyWorker.id)
         .filter(
-            StrategyTrade.user_id == current_user.id,
+            StrategyWorker.user_id == current_user.id,
             StrategyTrade.strategy_id == strategy_id,
             StrategyTrade.trade_date == today,
         )
@@ -150,7 +157,7 @@ def get_signal(
     daily_status = check_daily_trade_status([t.status for t in today_trades])
 
     return MACDSignalResponse(
-        symbol=strategy.symbol,
+        symbol=symbol or "",
         macd=round(signal.macd, 6) if signal else 0.0,
         signal=round(signal.signal, 6) if signal else 0.0,
         histogram=round(signal.histogram, 6) if signal else 0.0,
@@ -163,30 +170,32 @@ def get_signal(
 
 
 # ---------------------------------------------------------------------------
-# Launch a trade — user supplies only margin; all params from AdminStrategy
+# Start a strategy worker
 # ---------------------------------------------------------------------------
 
-@router.post("/launch", response_model=StrategyTradeResponse, status_code=status.HTTP_201_CREATED)
-def launch_trade(
-    payload: MACDTradeLaunchRequest,
+@router.post("/launch", response_model=WorkerResponse, status_code=status.HTTP_201_CREATED)
+def launch_worker(
+    payload: WorkerLaunchRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Open a MACD D1 long trade.
+    Start a strategy worker for the authenticated user.
 
-    The user only provides:
-    - strategy_id  — which admin strategy to trade
-    - margin       — USDT margin to risk (must be ≤ wallet balance)
-    - entry_price  — the current mark/last price to compute TP and SL
+    The worker runs autonomously in the background.  It reads the Strategy
+    config, polls market signals via the orchestrator, and opens / closes
+    trades on the user's behalf — without any further user interaction.
 
-    All other parameters (leverage, rr_ratio, daily limits, symbol) come from
-    the AdminStrategy record, not from user input.
+    Validation:
+    - Active subscription required.
+    - Margin must be > 0 and ≤ wallet balance.
+    - Subscription plan limits the number of concurrent running workers.
+    - Subscription coins must overlap with the strategy's symbols (starter/trader plans).
     """
-    _get_active_subscription_or_403(current_user, db)
+    sub = _get_active_subscription_or_403(current_user, db)
     strategy = _get_strategy_or_404(payload.strategy_id, db)
 
-    # --- Validate margin against wallet balance ---
+    # --- Validate margin ---
     wallet = db.query(Wallet).filter(Wallet.user_id == current_user.id).first()
     available = Decimal(str(wallet.balance)) if wallet else Decimal("0")
     margin = Decimal(str(payload.margin))
@@ -195,124 +204,112 @@ def launch_trade(
     if margin > available:
         raise HTTPException(
             status_code=400,
-            detail=f"Insufficient balance. Margin {margin} exceeds available {available} USDT",
+            detail=f"Insufficient balance: margin {margin} USDT > available {available} USDT",
         )
 
-    # --- Enforce daily trade limits ---
-    today = date.today()
-    today_trades = (
-        db.query(StrategyTrade)
+    # --- Subscription plan: concurrent worker limit ---
+    max_workers = _PLAN_MAX_WORKERS.get(sub.plan, 1)
+    running_count = (
+        db.query(StrategyWorker)
         .filter(
-            StrategyTrade.user_id == current_user.id,
-            StrategyTrade.strategy_id == payload.strategy_id,
-            StrategyTrade.trade_date == today,
+            StrategyWorker.user_id == current_user.id,
+            StrategyWorker.status == "running",
         )
-        .order_by(StrategyTrade.created_at.asc())
-        .all()
+        .count()
     )
-    daily_status = check_daily_trade_status([t.status for t in today_trades])
-
-    if not daily_status.can_open_trade:
-        raise HTTPException(status_code=400, detail=daily_status.reason)
-
-    # --- Enforce daily margin cap if set by admin ---
-    if strategy.max_daily_margin_usd > 0:
-        used_today = sum(
-            Decimal(str(t.details.get("margin", 0))) for t in today_trades
+    if running_count >= max_workers:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Your '{sub.plan}' plan allows at most {max_workers} running "
+                f"worker(s). Stop an existing worker before starting a new one."
+            ),
         )
-        if (used_today + margin) > Decimal(str(strategy.max_daily_margin_usd)):
+
+    # --- Subscription plan: symbol access ---
+    sub_coins = sub.coins or []
+    if sub_coins:  # if the subscription restricts coins
+        allowed = set(sub_coins)
+        strategy_symbols = set(strategy.symbols or [])
+        if not strategy_symbols.intersection(allowed):
             raise HTTPException(
-                status_code=400,
+                status_code=403,
                 detail=(
-                    f"Daily margin cap of ${strategy.max_daily_margin_usd} would be exceeded. "
-                    f"Already used: ${used_today}"
+                    f"None of the strategy's symbols {sorted(strategy_symbols)} "
+                    f"are included in your subscription ({sorted(allowed)}). "
+                    "Upgrade your plan or choose a different strategy."
                 ),
             )
 
-    entry_number = daily_status.next_entry_number
-    timeframe = "d1" if entry_number == 1 else "15m"
-
-    leverage = strategy.leverage
-    rr_ratio = strategy.rr_ratio
-    margin_float = float(margin)
-
-    tp = calculate_take_profit(
-        entry_price=payload.entry_price,
-        margin=margin_float,
-        leverage=leverage,
-        rr_ratio=rr_ratio,
-    )
-    sl = calculate_stop_loss(
-        entry_price=payload.entry_price,
-        margin=margin_float,
-        leverage=leverage,
-    )
-
-    # Resolve exchange from user's connected accounts
+    # --- Resolve exchange ---
     exchange_id = _resolve_exchange_id(current_user.id, db)
 
-    trade = StrategyTrade(
+    worker = StrategyWorker(
         user_id=current_user.id,
         strategy_id=payload.strategy_id,
-        strategy_type="macd",
-        symbol=strategy.symbol,
-        exchange=exchange_id,
-        status="open",
-        trade_date=today,
-        details={
-            "timeframe": timeframe,
-            "entry_number": entry_number,
-            "entry_price": str(payload.entry_price),
-            "take_profit_price": str(tp),
-            "stop_loss_price": str(sl),
-            "margin": str(margin),
-            "leverage": leverage,
-            "rr_ratio": rr_ratio,
-        },
+        margin=margin,
+        exchange_id=exchange_id,
+        status="running",
     )
-    db.add(trade)
+    db.add(worker)
     db.commit()
-    db.refresh(trade)
-    return trade
+    db.refresh(worker)
+    return worker
 
 
 # ---------------------------------------------------------------------------
-# Close a trade manually
+# Stop a strategy worker
 # ---------------------------------------------------------------------------
 
-@router.post("/close/{trade_id}", response_model=StrategyTradeResponse)
-def close_trade(
-    trade_id: int,
-    payload: MACDTradeClose,
+@router.post("/stop/{worker_id}", response_model=WorkerResponse)
+def stop_worker(
+    worker_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Close an open MACD trade and record the result ('win' or 'loss')."""
-    if payload.result not in ("win", "loss"):
-        raise HTTPException(status_code=400, detail="result must be 'win' or 'loss'")
+    """Stop a running strategy worker. Open trades are NOT force-closed."""
+    from datetime import datetime
 
-    trade = (
-        db.query(StrategyTrade)
+    worker = (
+        db.query(StrategyWorker)
         .filter(
-            StrategyTrade.id == trade_id,
-            StrategyTrade.user_id == current_user.id,
-            StrategyTrade.strategy_type == "macd",
+            StrategyWorker.id == worker_id,
+            StrategyWorker.user_id == current_user.id,
         )
         .first()
     )
-    if trade is None:
-        raise HTTPException(status_code=404, detail="Trade not found")
-    if trade.status != "open":
-        raise HTTPException(status_code=400, detail="Trade is already closed")
+    if worker is None:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    if worker.status != "running":
+        raise HTTPException(status_code=400, detail="Worker is not running")
 
-    trade.status = payload.result
+    worker.status = "stopped"
+    worker.stopped_at = datetime.utcnow()
     db.commit()
-    db.refresh(trade)
-    return trade
+    db.refresh(worker)
+    return worker
 
 
 # ---------------------------------------------------------------------------
-# Trade history
+# Worker listing
+# ---------------------------------------------------------------------------
+
+@router.get("/workers", response_model=List[WorkerResponse])
+def list_workers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return all strategy workers for the current user, most recent first."""
+    return (
+        db.query(StrategyWorker)
+        .filter(StrategyWorker.user_id == current_user.id)
+        .order_by(StrategyWorker.created_at.desc())
+        .all()
+    )
+
+
+# ---------------------------------------------------------------------------
+# Trade history (read-only — created by workers)
 # ---------------------------------------------------------------------------
 
 @router.get("/trades", response_model=List[StrategyTradeResponse])

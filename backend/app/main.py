@@ -43,6 +43,7 @@ async def startup_event():
     import app.models.trade         # noqa: F401
     import app.models.user          # noqa: F401
     import app.models.wallet        # noqa: F401
+    import app.models.worker        # noqa: F401
 
     Base.metadata.create_all(bind=engine)
 

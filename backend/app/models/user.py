@@ -29,4 +29,5 @@ class User(Base):
     subscriptions = relationship("Subscription", back_populates="user")
     wallet = relationship("Wallet", back_populates="user", uselist=False)
     exchanges = relationship("UserExchange", back_populates="user")
+    strategy_workers = relationship("StrategyWorker", back_populates="user")
     strategy_trades = relationship("StrategyTrade", back_populates="user")

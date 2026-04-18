@@ -1,26 +1,28 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, JSON, String
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
 
-# Symbols supported by the MACD D1 strategy
-MACD_ALLOWED_SYMBOLS = ["BTC/USDT", "ETH/USDT", "HYPE/USDT"]
+# The one strategy implementation available today
+STRATEGY_DCA_MACD_DAILY = "DCA_MACD_DAILY"
+SUPPORTED_STRATEGIES = [STRATEGY_DCA_MACD_DAILY]
 
 
-class AdminStrategy(Base):
+class Strategy(Base):
     """
     Admin-controlled strategy template.
 
     Admins create and manage these records via the /admin/strategies API.
-    Users cannot modify strategy parameters — they can only pick a strategy
-    and supply their margin when launching a trade.
+    Users cannot modify strategy parameters — they only supply ``margin``
+    when starting a StrategyWorker.
 
     Fields
     ------
-    name          — human-readable label, e.g. "BTC MACD D1 Long"
-    symbol        — trading pair (must be one of MACD_ALLOWED_SYMBOLS)
+    name          — human-readable label, e.g. "BTC/ETH MACD D1 Long"
+    strategy      — strategy implementation identifier, e.g. "DCA_MACD_DAILY"
+    symbols       — JSON list of allowed trading pairs, e.g. ["BTC/USDT","ETH/USDT"]
     leverage      — exchange leverage multiplier (e.g. 20)
     rr_ratio      — risk-to-reward ratio (default 2 = 1:2)
     max_daily_trades        — max entries allowed per user per calendar day
@@ -29,11 +31,12 @@ class AdminStrategy(Base):
     is_active     — only active strategies are visible to users
     """
 
-    __tablename__ = "admin_strategies"
+    __tablename__ = "strategies"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
-    symbol = Column(String, nullable=False)
+    strategy = Column(String, nullable=False, default=STRATEGY_DCA_MACD_DAILY)
+    symbols = Column(JSON, nullable=False, default=list)   # e.g. ["BTC/USDT", "ETH/USDT"]
     leverage = Column(Float, nullable=False, default=20.0)
     rr_ratio = Column(Float, nullable=False, default=2.0)
     max_daily_trades = Column(Integer, nullable=False, default=2)
@@ -41,3 +44,5 @@ class AdminStrategy(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    workers = relationship("StrategyWorker", back_populates="strategy")

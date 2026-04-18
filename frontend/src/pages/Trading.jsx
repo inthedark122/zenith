@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react'
 import client from '../api/client'
 
-// ---- Strategy Card ----
+// ---- Strategy Card (start worker) ----
 function StrategyCard({ strategy, walletBalance, onLaunched }) {
   const [margin, setMargin] = useState('')
-  const [entryPrice, setEntryPrice] = useState('')
   const [signal, setSignal] = useState(null)
   const [signalLoading, setSignalLoading] = useState(false)
   const [launching, setLaunching] = useState(false)
@@ -30,22 +29,22 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
     setSuccess('')
     const marginVal = parseFloat(margin)
     if (!marginVal || marginVal <= 0) { setError('Enter a valid margin'); return }
-    if (marginVal > walletBalance) { setError(`Insufficient balance (available: $${walletBalance.toFixed(2)})`); return }
-    if (!entryPrice || parseFloat(entryPrice) <= 0) { setError('Enter a valid entry price'); return }
+    if (marginVal > walletBalance) {
+      setError(`Insufficient balance (available: $${walletBalance.toFixed(2)})`)
+      return
+    }
     setLaunching(true)
     try {
       await client.post('/trading/launch', {
         strategy_id: strategy.id,
         margin: marginVal,
-        entry_price: parseFloat(entryPrice),
       })
-      setSuccess('Trade launched!')
+      setSuccess('Worker started! It will open trades automatically when signals fire.')
       setMargin('')
-      setEntryPrice('')
       setSignal(null)
       onLaunched()
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to launch trade')
+      setError(err.response?.data?.detail || 'Failed to start worker')
     } finally {
       setLaunching(false)
     }
@@ -61,7 +60,7 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
       <div className="flex justify-between items-center mb-4">
         <div>
           <div className="text-white font-bold text-base">{strategy.name}</div>
-          <div className="text-[#a78bfa] text-xs mt-0.5">{strategy.symbol}</div>
+          <div className="text-[#a78bfa] text-xs mt-0.5">{strategy.strategy}</div>
         </div>
         <div className="flex gap-3 text-xs text-[#888]">
           <div className="text-center">
@@ -79,13 +78,23 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
         </div>
       </div>
 
-      {/* Strategy info */}
+      {/* Symbols */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {(strategy.symbols || []).map((sym) => (
+          <span key={sym} className="bg-[#1a1a2e] border border-[#6c47ff33] text-[#a78bfa] rounded-md px-2 py-0.5 text-xs font-semibold">
+            {sym}
+          </span>
+        ))}
+      </div>
+
+      {/* Strategy rules */}
       <div className="bg-[#1a1a2e] border border-[#6c47ff33] rounded-[10px] p-3.5 mb-4">
         <div className="text-[#a78bfa] text-xs leading-relaxed">
-          <strong className="text-[#c4b5fd]">Strategy rules:</strong><br />
-          • D1 MACD bullish crossover → Long entry<br />
-          • Risk/Reward: 1:{strategy.rr_ratio} (risk 100% margin, target {strategy.rr_ratio}×)<br />
-          • Max {strategy.max_daily_trades} entries per day · Entry #2 from 15m correction
+          <strong className="text-[#c4b5fd]">How it works:</strong><br />
+          • Worker runs automatically in the background<br />
+          • D1 MACD bullish crossover → opens a Long trade<br />
+          • Risk/Reward 1:{strategy.rr_ratio} · Worker auto-closes at TP or SL<br />
+          • Max {strategy.max_daily_trades} entries per day per symbol
           {strategy.max_daily_margin_usd > 0 && (
             <><br />• Max daily margin: ${strategy.max_daily_margin_usd}</>
           )}
@@ -104,16 +113,10 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
             <span className="text-white text-xs font-semibold">{signal.signal.toFixed(4)}</span>
           </div>
           <div className="flex justify-between mb-1.5">
-            <span className="text-[#888] text-xs">Histogram</span>
-            <span className="text-white text-xs font-semibold">{signal.histogram.toFixed(4)}</span>
-          </div>
-          <div className="flex justify-between mb-1.5">
             <span className="text-[#888] text-xs">D1 Cross</span>
             {signal.is_bullish_crossover
-              ? <span className="text-[#34d399] text-xs font-bold">🟢 Bullish — LONG</span>
-              : signal.is_bearish_crossover
-                ? <span className="text-[#f87171] text-xs font-bold">🔴 Bearish</span>
-                : <span className="text-[#888] text-xs font-semibold">No crossover</span>}
+              ? <span className="text-[#34d399] text-xs font-bold">🟢 Bullish — LONG ready</span>
+              : <span className="text-[#888] text-xs font-semibold">No crossover</span>}
           </div>
           <div className="flex justify-between">
             <span className="text-[#888] text-xs">Today</span>
@@ -121,14 +124,13 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
               {signal.can_open_trade ? `Entry #${signal.next_entry_number} available` : 'Daily limit reached'}
             </span>
           </div>
-          <div className="text-[#555] text-[11px] mt-1">{signal.daily_status_reason}</div>
         </div>
       )}
 
-      {/* Launch form — only show margin + entry price */}
+      {/* Launch form — margin only */}
       <form onSubmit={handleLaunch} className="mb-3">
         <label className="block text-[#aaa] text-xs mb-1.5">
-          Margin (USDT) — available: <span className="text-white font-semibold">${walletBalance.toFixed(2)}</span>
+          Margin per trade (USDT) — available: <span className="text-white font-semibold">${walletBalance.toFixed(2)}</span>
         </label>
         <input
           className="w-full bg-[#1e1e1e] border border-[#333] rounded-lg px-3 py-2.5 text-white text-sm outline-none mb-3"
@@ -141,17 +143,6 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
           step="any"
           required
         />
-        <label className="block text-[#aaa] text-xs mb-1.5">Entry Price (USDT)</label>
-        <input
-          className="w-full bg-[#1e1e1e] border border-[#333] rounded-lg px-3 py-2.5 text-white text-sm outline-none mb-3"
-          type="number"
-          value={entryPrice}
-          onChange={(e) => setEntryPrice(e.target.value)}
-          placeholder="e.g. 65000"
-          min="0.01"
-          step="any"
-          required
-        />
         <div className="flex gap-2">
           <button
             type="button"
@@ -159,14 +150,14 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
             disabled={signalLoading}
             className="bg-none border border-[#6c47ff] rounded-lg text-[#a78bfa] px-4 py-2.5 font-semibold text-sm cursor-pointer disabled:opacity-50"
           >
-            {signalLoading ? '…' : '📊 Check Signal'}
+            {signalLoading ? '…' : '📊 Signal'}
           </button>
           <button
             type="submit"
             disabled={launching}
             className="flex-1 bg-gradient-to-r from-[#6c47ff] to-[#a78bfa] border-none rounded-lg text-white px-4 py-2.5 font-semibold text-sm cursor-pointer disabled:opacity-50"
           >
-            {launching ? 'Launching…' : '🚀 Launch Trade'}
+            {launching ? 'Starting…' : '▶ Start Worker'}
           </button>
         </div>
       </form>
@@ -177,8 +168,48 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
   )
 }
 
+// ---- Worker Row ----
+function WorkerRow({ worker, onStop }) {
+  const [stopping, setStopping] = useState(false)
+  const isRunning = worker.status === 'running'
+
+  const handleStop = async () => {
+    setStopping(true)
+    try { await onStop(worker.id) } finally { setStopping(false) }
+  }
+
+  return (
+    <div className="mx-5 mb-2.5 bg-[#141414] rounded-xl p-4 border border-[#222]">
+      <div className="flex justify-between items-center mb-2">
+        <div className="text-white font-bold text-sm">
+          Worker #{worker.id}
+          <span className="text-[#888] text-xs font-normal ml-2">Strategy #{worker.strategy_id}</span>
+        </div>
+        <span className={`rounded-md px-2.5 py-0.5 text-xs font-semibold ${isRunning ? 'bg-[rgba(52,211,153,0.15)] text-[#34d399]' : 'bg-[rgba(136,136,136,0.12)] text-[#888]'}`}>
+          {worker.status.toUpperCase()}
+        </span>
+      </div>
+      <div className="flex gap-4 mb-3 flex-wrap text-xs">
+        <div><div className="text-[#555]">Exchange</div><div className="text-white font-semibold">{worker.exchange_id.toUpperCase()}</div></div>
+        <div><div className="text-[#555]">Margin/trade</div><div className="text-white font-semibold">${parseFloat(worker.margin).toFixed(2)}</div></div>
+        <div><div className="text-[#555]">Started</div><div className="text-white font-semibold">{worker.started_at ? new Date(worker.started_at).toLocaleDateString() : '—'}</div></div>
+        {worker.stopped_at && <div><div className="text-[#555]">Stopped</div><div className="text-white font-semibold">{new Date(worker.stopped_at).toLocaleDateString()}</div></div>}
+      </div>
+      {isRunning && (
+        <button
+          onClick={handleStop}
+          disabled={stopping}
+          className="bg-[rgba(248,113,113,0.12)] border border-[#f87171] rounded-lg text-[#f87171] px-4 py-2 font-semibold text-sm cursor-pointer disabled:opacity-50"
+        >
+          {stopping ? 'Stopping…' : '⏹ Stop Worker'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ---- Trade Row ----
-function TradeRow({ trade, onClose }) {
+function TradeRow({ trade }) {
   const d = trade.details || {}
   const resultColors = {
     win: 'bg-[rgba(52,211,153,0.15)] text-[#34d399]',
@@ -191,48 +222,30 @@ function TradeRow({ trade, onClose }) {
     <div className="mx-5 mb-2.5 bg-[#141414] rounded-xl p-4 border border-[#222]">
       <div className="flex justify-between items-center mb-2.5">
         <div className="text-white font-bold text-base">
-          {trade.symbol}{' '}
-          <span className="text-[#888] text-xs font-normal">
-            Entry #{d.entry_number} · {(d.timeframe || '').toUpperCase()}
+          {trade.symbol}
+          <span className="text-[#888] text-xs font-normal ml-1.5">
+            #{d.entry_number} · {(d.timeframe || '').toUpperCase()}
           </span>
         </div>
         <span className={`rounded-md px-2.5 py-0.5 text-xs font-semibold ${badge}`}>
           {trade.status.toUpperCase()}
         </span>
       </div>
-
-      <div className="flex gap-4 mb-2.5 flex-wrap">
+      <div className="flex gap-4 flex-wrap text-xs">
         {[
-          { l: 'Exchange', v: (trade.exchange || 'okx').toUpperCase() },
+          { l: 'Exchange', v: (trade.exchange || '').toUpperCase() },
           { l: 'Entry', v: d.entry_price ? `$${parseFloat(d.entry_price).toFixed(2)}` : '—' },
           { l: 'Take Profit', v: d.take_profit_price ? `$${parseFloat(d.take_profit_price).toFixed(2)}` : '—' },
           { l: 'Stop Loss', v: d.stop_loss_price ? `$${parseFloat(d.stop_loss_price).toFixed(2)}` : '—' },
-          { l: 'Margin', v: `$${d.margin}` },
-          { l: 'Leverage', v: `${d.leverage}×` },
+          { l: 'Margin', v: `$${d.margin || '—'}` },
+          { l: 'Leverage', v: d.leverage ? `${d.leverage}×` : '—' },
         ].map(({ l, v }) => (
           <div key={l}>
-            <div className="text-[#555] text-[11px]">{l}</div>
-            <div className="text-white font-semibold text-xs">{v}</div>
+            <div className="text-[#555]">{l}</div>
+            <div className="text-white font-semibold">{v}</div>
           </div>
         ))}
       </div>
-
-      {trade.status === 'open' && (
-        <div className="flex gap-2">
-          <button
-            onClick={() => onClose(trade.id, 'win')}
-            className="bg-gradient-to-r from-[#059669] to-[#34d399] border-none rounded-lg text-white px-4 py-2.5 font-semibold text-sm cursor-pointer"
-          >
-            ✅ Win
-          </button>
-          <button
-            onClick={() => onClose(trade.id, 'loss')}
-            className="bg-[rgba(248,113,113,0.15)] border border-[#f87171] rounded-lg text-[#f87171] px-4 py-2.5 font-semibold text-sm cursor-pointer"
-          >
-            ❌ Loss
-          </button>
-        </div>
-      )}
     </div>
   )
 }
@@ -240,6 +253,7 @@ function TradeRow({ trade, onClose }) {
 // ---- Main Page ----
 export default function Trading() {
   const [strategies, setStrategies] = useState([])
+  const [workers, setWorkers] = useState([])
   const [trades, setTrades] = useState([])
   const [walletBalance, setWalletBalance] = useState(0)
   const [tab, setTab] = useState('strategies')
@@ -247,23 +261,23 @@ export default function Trading() {
 
   const loadData = () => {
     client.get('/trading/strategies').then((r) => setStrategies(r.data)).catch(() => {})
+    client.get('/trading/workers').then((r) => setWorkers(r.data)).catch(() => {})
     client.get('/trading/trades').then((r) => setTrades(r.data)).catch(() => {})
     client.get('/wallet').then((r) => setWalletBalance(parseFloat(r.data.balance) || 0)).catch(() => {})
   }
 
   useEffect(() => { loadData() }, [])
 
-  const handleCloseTrade = async (tradeId, result) => {
+  const handleStopWorker = async (workerId) => {
     try {
-      await client.post(`/trading/close/${tradeId}`, { result })
+      await client.post(`/trading/stop/${workerId}`)
       loadData()
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to close trade')
+      setError(err.response?.data?.detail || 'Failed to stop worker')
     }
   }
 
-  const todayStr = new Date().toISOString().slice(0, 10)
-  const todayTrades = trades.filter((t) => t.trade_date === todayStr)
+  const runningWorkers = workers.filter((w) => w.status === 'running')
   const openTrades = trades.filter((t) => t.status === 'open')
 
   return (
@@ -271,11 +285,15 @@ export default function Trading() {
       {/* Header */}
       <div className="px-5 pt-6 pb-4">
         <div className="text-white text-[22px] font-bold">Trading</div>
-        <div className="text-[#888] text-sm mt-1">MACD D1 · BTC · ETH · HYPE</div>
+        <div className="text-[#888] text-sm mt-1">DCA_MACD_DAILY · Workers run automatically</div>
         <div className="flex items-center gap-2 mt-3">
           <div className="bg-[#1e1e1e] border border-[#333] rounded-xl px-4 py-2.5 flex-1 text-center">
             <div className="text-[#888] text-xs">Wallet Balance</div>
             <div className="text-white font-bold text-lg">${walletBalance.toFixed(2)} USDT</div>
+          </div>
+          <div className="bg-[#1e1e1e] border border-[#333] rounded-xl px-4 py-2.5 text-center">
+            <div className="text-[#888] text-xs">Running</div>
+            <div className="text-[#34d399] font-bold text-lg">{runningWorkers.length}</div>
           </div>
         </div>
       </div>
@@ -284,8 +302,8 @@ export default function Trading() {
       <div className="flex mx-5 mb-2 border-b border-[#222]">
         {[
           { key: 'strategies', label: '📋 Strategies' },
-          { key: 'open', label: `⚡ Open (${openTrades.length})` },
-          { key: 'history', label: '📜 History' },
+          { key: 'workers', label: `⚙️ Workers (${runningWorkers.length})` },
+          { key: 'trades', label: `📜 Trades (${openTrades.length} open)` },
         ].map(({ key, label }) => (
           <button
             key={key}
@@ -299,51 +317,34 @@ export default function Trading() {
 
       {error && <div className="text-[#f87171] text-xs mx-5 mb-2">{error}</div>}
 
-      {/* Strategies tab */}
+      {/* Strategies */}
       {tab === 'strategies' && (
+        strategies.length === 0
+          ? <div className="text-center text-[#555] py-6 px-5 text-sm">No strategies available yet.</div>
+          : strategies.map((s) => (
+            <StrategyCard key={s.id} strategy={s} walletBalance={walletBalance} onLaunched={loadData} />
+          ))
+      )}
+
+      {/* Workers */}
+      {tab === 'workers' && (
         <>
-          {strategies.length === 0 ? (
-            <div className="text-center text-[#555] py-6 px-5 text-sm">
-              No strategies available yet. Ask an admin to create one.
-            </div>
-          ) : (
-            strategies.map((s) => (
-              <StrategyCard
-                key={s.id}
-                strategy={s}
-                walletBalance={walletBalance}
-                onLaunched={loadData}
-              />
-            ))
-          )}
+          <div className="text-white text-base font-semibold px-5 py-4">Your Workers</div>
+          {workers.length === 0
+            ? <div className="text-center text-[#555] py-6 px-5 text-sm">No workers yet — start one from Strategies.</div>
+            : workers.map((w) => <WorkerRow key={w.id} worker={w} onStop={handleStopWorker} />)
+          }
         </>
       )}
 
-      {/* Open trades tab */}
-      {tab === 'open' && (
-        <>
-          <div className="text-white text-base font-semibold px-5 py-4">Open Trades</div>
-          {openTrades.length === 0 ? (
-            <div className="text-center text-[#555] py-6 px-5 text-sm">No open trades</div>
-          ) : (
-            openTrades.map((t) => (
-              <TradeRow key={t.id} trade={t} onClose={handleCloseTrade} />
-            ))
-          )}
-        </>
-      )}
-
-      {/* History tab */}
-      {tab === 'history' && (
+      {/* Trades */}
+      {tab === 'trades' && (
         <>
           <div className="text-white text-base font-semibold px-5 py-4">Trade History</div>
-          {trades.length === 0 ? (
-            <div className="text-center text-[#555] py-6 px-5 text-sm">No trades yet</div>
-          ) : (
-            trades.map((t) => (
-              <TradeRow key={t.id} trade={t} onClose={handleCloseTrade} />
-            ))
-          )}
+          {trades.length === 0
+            ? <div className="text-center text-[#555] py-6 px-5 text-sm">No trades yet — workers create them automatically.</div>
+            : trades.map((t) => <TradeRow key={t.id} trade={t} />)
+          }
         </>
       )}
     </div>

@@ -1,25 +1,35 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, field_validator
 
-from app.models.strategy import MACD_ALLOWED_SYMBOLS
+from app.models.strategy import SUPPORTED_STRATEGIES
 
 
-class AdminStrategyCreate(BaseModel):
+class StrategyCreate(BaseModel):
     name: str
-    symbol: str
+    strategy: str = "DCA_MACD_DAILY"
+    symbols: List[str]
     leverage: float = 20.0
     rr_ratio: float = 2.0
     max_daily_trades: int = 2
     max_daily_margin_usd: float = 0.0
     is_active: bool = True
 
-    @field_validator("symbol")
+    @field_validator("strategy")
     @classmethod
-    def validate_symbol(cls, v: str) -> str:
-        if v not in MACD_ALLOWED_SYMBOLS:
-            raise ValueError(f"symbol must be one of: {', '.join(MACD_ALLOWED_SYMBOLS)}")
+    def validate_strategy(cls, v: str) -> str:
+        if v not in SUPPORTED_STRATEGIES:
+            raise ValueError(
+                f"strategy must be one of: {', '.join(SUPPORTED_STRATEGIES)}"
+            )
+        return v
+
+    @field_validator("symbols")
+    @classmethod
+    def validate_symbols(cls, v: List[str]) -> List[str]:
+        if not v:
+            raise ValueError("symbols must contain at least one trading pair")
         return v
 
     @field_validator("leverage")
@@ -37,8 +47,9 @@ class AdminStrategyCreate(BaseModel):
         return v
 
 
-class AdminStrategyUpdate(BaseModel):
+class StrategyUpdate(BaseModel):
     name: Optional[str] = None
+    symbols: Optional[List[str]] = None
     leverage: Optional[float] = None
     rr_ratio: Optional[float] = None
     max_daily_trades: Optional[int] = None
@@ -46,10 +57,11 @@ class AdminStrategyUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
-class AdminStrategyResponse(BaseModel):
+class StrategyResponse(BaseModel):
     id: int
     name: str
-    symbol: str
+    strategy: str
+    symbols: List[str]
     leverage: float
     rr_ratio: float
     max_daily_trades: int

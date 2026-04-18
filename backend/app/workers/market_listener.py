@@ -1,67 +1,87 @@
 """
-Market Listener Worker
-======================
+Market Listener — orchestrator
+================================
 
-An internal asyncio runner that continuously monitors exchange market data and
-user open trades in real time.  This replaces the on-demand REST polling used
-by the /trading/macd-signal endpoint.
+This worker runs as an asyncio background task for the lifetime of the
+application.  It is responsible for two things:
 
-Responsibilities
-----------------
-1. **MACD signal tracking** — polls D1 OHLCV for BTC/USDT, ETH/USDT, HYPE/USDT
-   every ``MARKET_POLL_INTERVAL`` seconds and caches the latest MACDSignal.
+1. **Signal cache refresh** — polls D1 OHLCV from the exchange every
+   ``MARKET_POLL_INTERVAL`` seconds for all symbols referenced by any
+   active Strategy record and stores the result in ``LATEST_SIGNALS``.
 
-2. **TP / SL auto-close** — for every open MACD trade, fetches the latest mark
-   price from OKX (or the user's connected exchange) and automatically closes
-   the trade (status → "win" or "loss") when TP or SL is hit.
+2. **Strategy worker dispatch** — for every *running* StrategyWorker,
+   calls the matching strategy-implementation module so it can evaluate
+   entry signals and monitor open trades.
 
-Cached signal state
--------------------
-The ``LATEST_SIGNALS`` dict maps symbol → MACDSignal (or None).
-API handlers can read from this cache instead of hitting the exchange.
+Strategy implementations live under ``app/strategies/<strategy_id>/worker.py``
+and each exposes a single function::
 
-Configuration (via .env / environment variables)
--------------------------------------------------
-MARKET_POLL_INTERVAL   — seconds between market data polls (default 60)
+    def run_for_worker(
+        worker: StrategyWorker,
+        latest_signals: Dict[str, Optional[MACDSignal]],
+        current_prices: Dict[str, float],
+        db: Session,
+    ) -> None: ...
+
+Currently supported strategies:
+  - ``DCA_MACD_DAILY`` → app.strategies.dca_macd_daily.worker
 """
 
 import asyncio
 import logging
-from datetime import date
 from typing import Dict, Optional
 
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.models.strategy import MACD_ALLOWED_SYMBOLS
-from app.models.trade import StrategyTrade
+from app.models.strategy import STRATEGY_DCA_MACD_DAILY, Strategy
+from app.models.worker import StrategyWorker
 from app.services.exchange import exchange_service
 from app.services.macd_strategy import MACDSignal, get_macd_signal
+from app.strategies.dca_macd_daily import worker as dca_macd_daily_worker
 
 log = logging.getLogger(__name__)
 
-# Shared cache: symbol → latest MACDSignal (None until first successful fetch)
-# Protected by _signals_lock for writes; readers may read without locking since
-# Python dict assignment is atomic (GIL) and stale reads are acceptable here.
-LATEST_SIGNALS: Dict[str, Optional[MACDSignal]] = {s: None for s in MACD_ALLOWED_SYMBOLS}
+# ---------------------------------------------------------------------------
+# Shared MACD signal cache
+# Populated by the orchestrator; read by strategy workers and API handlers.
+# Dict[symbol, MACDSignal | None]
+# ---------------------------------------------------------------------------
+LATEST_SIGNALS: Dict[str, Optional[MACDSignal]] = {}
 _signals_lock = asyncio.Lock()
 
-# How often to re-poll market data (seconds)
 MARKET_POLL_INTERVAL: int = settings.MARKET_POLL_INTERVAL
 
+# Mapping from strategy identifier → worker module
+_STRATEGY_IMPL = {
+    STRATEGY_DCA_MACD_DAILY: dca_macd_daily_worker,
+}
+
 
 # ---------------------------------------------------------------------------
-# MACD signal refresh
+# Helpers
 # ---------------------------------------------------------------------------
 
-async def _refresh_macd_signals() -> None:
-    """Fetch D1 OHLCV for every allowed symbol and update LATEST_SIGNALS."""
+def _collect_symbols(db) -> set:
+    """Return all symbols referenced by any active Strategy."""
+    strategies = db.query(Strategy).filter(Strategy.is_active).all()
+    symbols: set = set()
+    for s in strategies:
+        for sym in (s.symbols or []):
+            symbols.add(sym)
+    return symbols
+
+
+async def _refresh_signals(symbols: set) -> None:
+    """Fetch D1 OHLCV for each symbol and update LATEST_SIGNALS."""
+    if not symbols:
+        return
     try:
         exchange = exchange_service.get_default_exchange()
     except Exception as exc:
-        log.warning("Cannot initialise default exchange for market data: %s", exc)
+        log.warning("Cannot initialise default exchange for MACD refresh: %s", exc)
         return
 
-    for symbol in MACD_ALLOWED_SYMBOLS:
+    for symbol in symbols:
         try:
             ohlcv = await asyncio.to_thread(
                 exchange.fetch_ohlcv, symbol, "1d", limit=60
@@ -72,106 +92,103 @@ async def _refresh_macd_signals() -> None:
                 LATEST_SIGNALS[symbol] = signal
             if signal:
                 log.debug(
-                    "%s MACD signal updated: macd=%.4f signal=%.4f bull=%s bear=%s",
-                    symbol, signal.macd, signal.signal,
-                    signal.is_bullish_crossover, signal.is_bearish_crossover,
+                    "%s MACD signal: macd=%.4f signal=%.4f bull=%s",
+                    symbol, signal.macd, signal.signal, signal.is_bullish_crossover,
                 )
         except Exception as exc:
             log.warning("Failed to fetch OHLCV for %s: %s", symbol, exc)
 
 
-# ---------------------------------------------------------------------------
-# TP / SL monitoring
-# ---------------------------------------------------------------------------
+async def _fetch_prices(symbols: set) -> Dict[str, float]:
+    """Fetch the latest mark/last price for each symbol."""
+    if not symbols:
+        return {}
+    try:
+        exchange = exchange_service.get_default_exchange()
+    except Exception as exc:
+        log.warning("Cannot initialise exchange for price fetch: %s", exc)
+        return {}
 
-async def _check_open_trades() -> None:
+    prices: Dict[str, float] = {}
+    for sym in symbols:
+        try:
+            ticker = await asyncio.to_thread(exchange_service.get_ticker, exchange, sym)
+            prices[sym] = ticker["last"]
+        except Exception as exc:
+            log.warning("Cannot fetch ticker for %s: %s", sym, exc)
+    return prices
+
+
+async def _dispatch_strategy_workers(
+    signals: Dict[str, Optional[MACDSignal]],
+    prices: Dict[str, float],
+) -> None:
     """
-    For every open MACD trade, check whether the current price has hit the
-    take-profit or stop-loss level and auto-close the trade if so.
+    Iterate over all running StrategyWorkers and call the matching strategy
+    implementation in a thread so it can safely use synchronous SQLAlchemy.
     """
     db = SessionLocal()
     try:
-        open_trades = (
-            db.query(StrategyTrade)
-            .filter(
-                StrategyTrade.strategy_type == "macd",
-                StrategyTrade.status == "open",
-            )
+        running_workers = (
+            db.query(StrategyWorker)
+            .filter(StrategyWorker.status == "running")
             .all()
         )
-        if not open_trades:
-            return
 
-        try:
-            exchange = exchange_service.get_default_exchange()
-        except Exception as exc:
-            log.warning("Cannot initialise exchange for TP/SL check: %s", exc)
-            return
-
-        # Fetch tickers only for symbols that have open trades (deduplicated)
-        symbols_needed = {t.symbol for t in open_trades}
-        prices: Dict[str, float] = {}
-        for sym in symbols_needed:
-            try:
-                ticker = await asyncio.to_thread(exchange_service.get_ticker, exchange, sym)
-                prices[sym] = ticker["last"]
-            except Exception as exc:
-                log.warning("Cannot fetch ticker for %s: %s", sym, exc)
-
-        for trade in open_trades:
-            current_price = prices.get(trade.symbol)
-            if current_price is None:
-                continue
-
-            details = trade.details or {}
-            tp = details.get("take_profit_price")
-            sl = details.get("stop_loss_price")
-
-            if tp is None or sl is None:
-                continue
-
-            tp_price = float(tp)
-            sl_price = float(sl)
-
-            if current_price >= tp_price:
-                trade.status = "win"
-                log.info(
-                    "Trade #%d (%s) HIT TAKE PROFIT at %.4f (TP=%.4f)",
-                    trade.id, trade.symbol, current_price, tp_price,
+        for worker in running_workers:
+            strategy_key = worker.strategy.strategy if worker.strategy else None
+            impl = _STRATEGY_IMPL.get(strategy_key)
+            if impl is None:
+                log.warning(
+                    "Worker #%d: no implementation found for strategy '%s'",
+                    worker.id, strategy_key,
                 )
-            elif current_price <= sl_price:
-                trade.status = "loss"
-                log.info(
-                    "Trade #%d (%s) HIT STOP LOSS at %.4f (SL=%.4f)",
-                    trade.id, trade.symbol, current_price, sl_price,
+                continue
+            try:
+                impl.run_for_worker(
+                    worker=worker,
+                    latest_signals=signals,
+                    current_prices=prices,
+                    db=db,
+                )
+            except Exception as exc:
+                log.exception(
+                    "Worker #%d (%s): unhandled error in strategy implementation: %s",
+                    worker.id, strategy_key, exc,
                 )
 
         db.commit()
     except Exception as exc:
-        log.exception("Error during TP/SL check: %s", exc)
+        log.exception("Error in _dispatch_strategy_workers: %s", exc)
+        db.rollback()
     finally:
         db.close()
 
 
 # ---------------------------------------------------------------------------
-# Main runner loop
+# Main orchestrator loop
 # ---------------------------------------------------------------------------
 
 async def market_listener_loop() -> None:
     """
-    Entry-point for the market listener.
-    Runs forever; exceptions are caught per-task and the loop retries.
+    Entry point for the market-listener orchestrator.
+    Runs forever; each cycle refreshes signals, fetches prices,
+    then dispatches all running strategy workers.
     """
-    log.info(
-        "Market listener started. Poll interval: %ds. Watching: %s",
-        MARKET_POLL_INTERVAL,
-        ", ".join(MACD_ALLOWED_SYMBOLS),
-    )
+    log.info("Market listener orchestrator started. Poll interval: %ds", MARKET_POLL_INTERVAL)
 
     while True:
-        await asyncio.gather(
-            _refresh_macd_signals(),
-            _check_open_trades(),
-            return_exceptions=True,
-        )
+        db = SessionLocal()
+        try:
+            symbols = _collect_symbols(db)
+        finally:
+            db.close()
+
+        if symbols:
+            await _refresh_signals(symbols)
+            prices = await _fetch_prices(symbols)
+            await _dispatch_strategy_workers(dict(LATEST_SIGNALS), prices)
+        else:
+            log.debug("No active strategies — skipping market poll")
+
         await asyncio.sleep(MARKET_POLL_INTERVAL)
