@@ -19,7 +19,7 @@ class AdminStrategyCreate(BaseModel):
     @classmethod
     def validate_symbol(cls, v: str) -> str:
         if v not in MACD_ALLOWED_SYMBOLS:
-            raise ValueError(f"symbol must be one of {MACD_ALLOWED_SYMBOLS}")
+            raise ValueError(f"symbol must be one of: {', '.join(MACD_ALLOWED_SYMBOLS)}")
         return v
 
     @field_validator("leverage")

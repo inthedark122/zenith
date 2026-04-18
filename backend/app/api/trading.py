@@ -45,7 +45,7 @@ from app.services.macd_strategy import (
 router = APIRouter(prefix="/trading", tags=["trading"])
 
 
-def _assert_active_subscription(user: User, db: Session) -> Subscription:
+def _get_active_subscription_or_403(user: User, db: Session) -> Subscription:
     sub = (
         db.query(Subscription)
         .filter(Subscription.user_id == user.id, Subscription.status == "active")
@@ -62,7 +62,7 @@ def _assert_active_subscription(user: User, db: Session) -> Subscription:
 def _get_strategy_or_404(strategy_id: int, db: Session) -> AdminStrategy:
     strategy = (
         db.query(AdminStrategy)
-        .filter(AdminStrategy.id == strategy_id, AdminStrategy.is_active == True)  # noqa: E712
+        .filter(AdminStrategy.id == strategy_id, AdminStrategy.is_active)
         .first()
     )
     if strategy is None:
@@ -100,7 +100,7 @@ def list_active_strategies(
     """Return all active strategy templates that users can trade."""
     return (
         db.query(AdminStrategy)
-        .filter(AdminStrategy.is_active == True)  # noqa: E712
+        .filter(AdminStrategy.is_active)
         .order_by(AdminStrategy.id.asc())
         .all()
     )
@@ -183,7 +183,7 @@ def launch_trade(
     All other parameters (leverage, rr_ratio, daily limits, symbol) come from
     the AdminStrategy record, not from user input.
     """
-    _assert_active_subscription(current_user, db)
+    _get_active_subscription_or_403(current_user, db)
     strategy = _get_strategy_or_404(payload.strategy_id, db)
 
     # --- Validate margin against wallet balance ---
