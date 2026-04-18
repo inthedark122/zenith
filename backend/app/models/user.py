@@ -22,11 +22,11 @@ class User(Base):
     referral_code = Column(String(6), unique=True, index=True, nullable=False, default=_generate_referral_code)
     referred_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     is_active = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     referrer = relationship("User", remote_side=[id], backref="referrals")
     subscriptions = relationship("Subscription", back_populates="user")
     wallet = relationship("Wallet", back_populates="user", uselist=False)
     exchanges = relationship("UserExchange", back_populates="user")
-    strategy_configs = relationship("StrategyConfig", back_populates="user")
     strategy_trades = relationship("StrategyTrade", back_populates="user")

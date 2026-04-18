@@ -1,39 +1,18 @@
 from datetime import date, datetime
-from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel
 
 
 # ---------------------------------------------------------------------------
-# Unified strategy response schemas
+# Unified trade response
 # ---------------------------------------------------------------------------
 
-class StrategyConfigResponse(BaseModel):
-    """
-    Generic response for any strategy configuration.
-    Strategy-specific params are under ``settings``.
-    """
-    id: int
-    user_id: int
-    strategy_type: str
-    symbol: str
-    is_active: int
-    settings: Dict[str, Any]
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
 class StrategyTradeResponse(BaseModel):
-    """
-    Generic response for any strategy trade.
-    Strategy-specific trade data is under ``details``.
-    """
+    """Response for any strategy trade. All trade-specific data is under ``details``."""
     id: int
     user_id: int
-    config_id: Optional[int]
+    strategy_id: Optional[int]
     strategy_type: str
     symbol: str
     exchange: str
@@ -47,29 +26,20 @@ class StrategyTradeResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# DCA strategy — request schemas
+# MACD trade — request schemas
 # ---------------------------------------------------------------------------
 
-class DCAConfigCreate(BaseModel):
-    symbol: str
-    base_amount: Decimal
-    safety_order_multiplier: float = 2.0
-    price_deviation: float = 0.04
-    max_safety_orders: int = 6
+class MACDTradeLaunchRequest(BaseModel):
+    """
+    User-facing trade launch payload.
 
-
-# ---------------------------------------------------------------------------
-# MACD D1 strategy — request schemas
-# ---------------------------------------------------------------------------
-
-class MACDConfigCreate(BaseModel):
-    symbol: str
-    margin_per_trade: Decimal
-    leverage: float = 20.0
-    rr_ratio: float = 2.0
-
-
-class MACDTradeOpen(BaseModel):
+    Users supply only what they control:
+    - strategy_id — which admin-predefined strategy to use
+    - margin      — USDT margin to risk (validated ≤ wallet balance)
+    - entry_price — current mark price (used to compute TP/SL levels)
+    """
+    strategy_id: int
+    margin: float
     entry_price: float
 
 

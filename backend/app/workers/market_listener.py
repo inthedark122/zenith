@@ -32,7 +32,8 @@ from typing import Dict, Optional
 
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.models.trade import MACD_ALLOWED_SYMBOLS, StrategyTrade
+from app.models.strategy import MACD_ALLOWED_SYMBOLS
+from app.models.trade import StrategyTrade
 from app.services.exchange import exchange_service
 from app.services.macd_strategy import MACDSignal, get_macd_signal
 

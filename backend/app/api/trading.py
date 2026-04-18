@@ -1,23 +1,39 @@
-from datetime import date
+"""
+Trading API (MACD D1 — user-facing)
+=====================================
+
+Design
+------
+* Admin creates predefined ``AdminStrategy`` records via /admin/strategies.
+* Users browse active strategies via GET /trading/strategies.
+* Users launch a trade by providing only:
+    - strategy_id  — which admin-defined strategy to use
+    - margin       — how much USDT to risk (validated ≤ wallet balance)
+* All other parameters (leverage, rr_ratio, symbol, exchange) come from the
+  AdminStrategy record or the user's connected exchange — nothing is
+  hardcoded.
+"""
+from datetime import date, datetime
+from decimal import Decimal
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user, get_db
+from app.models.exchange import UserExchange
+from app.models.strategy import AdminStrategy
 from app.models.subscription import Subscription
-from app.models.trade import MACD_ALLOWED_SYMBOLS, StrategyConfig, StrategyTrade
+from app.models.trade import StrategyTrade
 from app.models.user import User
+from app.models.wallet import Wallet
+from app.schemas.strategy import AdminStrategyResponse
 from app.schemas.trade import (
-    DCAConfigCreate,
-    MACDConfigCreate,
     MACDSignalResponse,
     MACDTradeClose,
-    MACDTradeOpen,
-    StrategyConfigResponse,
+    MACDTradeLaunchRequest,
     StrategyTradeResponse,
 )
-from app.services.dca_strategy import calculate_dca_orders
 from app.services.exchange import exchange_service
 from app.services.macd_strategy import (
     calculate_stop_loss,
@@ -29,275 +45,92 @@ from app.services.macd_strategy import (
 router = APIRouter(prefix="/trading", tags=["trading"])
 
 
-def _assert_has_active_subscription(user: User, db: Session):
-    active = (
+def _assert_active_subscription(user: User, db: Session) -> Subscription:
+    sub = (
         db.query(Subscription)
         .filter(Subscription.user_id == user.id, Subscription.status == "active")
         .first()
     )
-    if active is None:
+    if sub is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="An active subscription is required to use trading features",
         )
-    return active
+    return sub
 
 
-def _get_config_or_404(
-    config_id: int,
-    strategy_type: str,
-    user_id: int,
-    db: Session,
-) -> StrategyConfig:
-    cfg = (
-        db.query(StrategyConfig)
-        .filter(
-            StrategyConfig.id == config_id,
-            StrategyConfig.strategy_type == strategy_type,
-            StrategyConfig.user_id == user_id,
-        )
+def _get_strategy_or_404(strategy_id: int, db: Session) -> AdminStrategy:
+    strategy = (
+        db.query(AdminStrategy)
+        .filter(AdminStrategy.id == strategy_id, AdminStrategy.is_active == True)  # noqa: E712
         .first()
     )
-    if cfg is None:
-        raise HTTPException(status_code=404, detail=f"{strategy_type.upper()} config not found")
-    return cfg
+    if strategy is None:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    return strategy
 
 
-# ---------------------------------------------------------------------------
-# DCA strategy endpoints
-# ---------------------------------------------------------------------------
+def _resolve_exchange_id(user_id: int, db: Session) -> str:
+    """
+    Return the exchange_id to record on the trade.
 
-@router.post("/dca-configs", response_model=StrategyConfigResponse, status_code=status.HTTP_201_CREATED)
-def create_dca_config(
-    payload: DCAConfigCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    sub = _assert_has_active_subscription(current_user, db)
-    if payload.symbol not in sub.coins:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Symbol {payload.symbol} is not in your subscription coins",
-        )
-
-    config = StrategyConfig(
-        user_id=current_user.id,
-        strategy_type="dca",
-        symbol=payload.symbol,
-        settings={
-            "base_amount": str(payload.base_amount),
-            "safety_order_multiplier": payload.safety_order_multiplier,
-            "price_deviation": payload.price_deviation,
-            "max_safety_orders": payload.max_safety_orders,
-        },
+    Preference order:
+    1. The user's default connected exchange.
+    2. Any connected exchange (first by created_at).
+    3. Falls back to "okx" if the user has not connected any exchange yet.
+    """
+    exc = (
+        db.query(UserExchange)
+        .filter(UserExchange.user_id == user_id)
+        .order_by(UserExchange.is_default.desc(), UserExchange.created_at.asc())
+        .first()
     )
-    db.add(config)
-    db.commit()
-    db.refresh(config)
-    return config
+    return exc.exchange_id if exc else "okx"
 
 
-@router.get("/dca-configs", response_model=List[StrategyConfigResponse])
-def list_dca_configs(
+# ---------------------------------------------------------------------------
+# Public strategy listing (users browse available strategies)
+# ---------------------------------------------------------------------------
+
+@router.get("/strategies", response_model=List[AdminStrategyResponse])
+def list_active_strategies(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Return all active strategy templates that users can trade."""
     return (
-        db.query(StrategyConfig)
-        .filter(
-            StrategyConfig.user_id == current_user.id,
-            StrategyConfig.strategy_type == "dca",
-        )
+        db.query(AdminStrategy)
+        .filter(AdminStrategy.is_active == True)  # noqa: E712
+        .order_by(AdminStrategy.id.asc())
         .all()
     )
 
 
-@router.put("/dca-configs/{config_id}", response_model=StrategyConfigResponse)
-def update_dca_config(
-    config_id: int,
-    payload: DCAConfigCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    config = _get_config_or_404(config_id, "dca", current_user.id, db)
-    if config.is_active:
-        raise HTTPException(status_code=400, detail="Cannot update a running bot; stop it first")
-
-    config.symbol = payload.symbol
-    config.settings = {
-        "base_amount": str(payload.base_amount),
-        "safety_order_multiplier": payload.safety_order_multiplier,
-        "price_deviation": payload.price_deviation,
-        "max_safety_orders": payload.max_safety_orders,
-    }
-    db.commit()
-    db.refresh(config)
-    return config
-
-
-@router.post("/start/{config_id}", response_model=StrategyTradeResponse)
-def start_bot(
-    config_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    _assert_has_active_subscription(current_user, db)
-    config = _get_config_or_404(config_id, "dca", current_user.id, db)
-    if config.is_active:
-        raise HTTPException(status_code=400, detail="Bot is already running")
-
-    try:
-        exchange = exchange_service.get_default_exchange()
-        ticker = exchange_service.get_ticker(exchange, config.symbol)
-        current_price = ticker["last"]
-    except Exception:
-        current_price = 0.0
-
-    orders = calculate_dca_orders(
-        base_amount=float(config.settings.get("base_amount", 0)),
-        current_price=current_price,
-        multiplier=config.settings.get("safety_order_multiplier", 2.0),
-        deviation=config.settings.get("price_deviation", 0.04),
-        max_orders=config.settings.get("max_safety_orders", 6),
-    )
-    safety_orders_data = [
-        {
-            "order_number": o.order_number,
-            "amount": str(o.amount),
-            "target_price": str(o.target_price),
-            "total_invested": str(o.total_invested),
-            "average_price": str(o.average_price),
-        }
-        for o in orders
-    ]
-
-    trade = StrategyTrade(
-        user_id=current_user.id,
-        config_id=config.id,
-        strategy_type="dca",
-        symbol=config.symbol,
-        exchange="okx",
-        status="active",
-        details={
-            "base_order_amount": config.settings.get("base_amount"),
-            "safety_orders": safety_orders_data,
-        },
-    )
-    db.add(trade)
-    config.is_active = 1
-    db.commit()
-    db.refresh(trade)
-    return trade
-
-
-@router.post("/stop/{config_id}")
-def stop_bot(
-    config_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    config = _get_config_or_404(config_id, "dca", current_user.id, db)
-    if not config.is_active:
-        raise HTTPException(status_code=400, detail="Bot is not running")
-
-    active_trade = (
-        db.query(StrategyTrade)
-        .filter(
-            StrategyTrade.user_id == current_user.id,
-            StrategyTrade.config_id == config.id,
-            StrategyTrade.status == "active",
-        )
-        .order_by(StrategyTrade.created_at.desc())
-        .first()
-    )
-    if active_trade:
-        active_trade.status = "stopped"
-
-    config.is_active = 0
-    db.commit()
-    return {"detail": f"Bot for {config.symbol} stopped"}
-
-
 # ---------------------------------------------------------------------------
-# MACD D1 strategy endpoints
+# MACD signal (live + worker cache)
 # ---------------------------------------------------------------------------
 
-@router.post("/macd-configs", response_model=StrategyConfigResponse, status_code=status.HTTP_201_CREATED)
-def create_macd_config(
-    payload: MACDConfigCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Create a MACD D1 bot configuration. Only BTC/USDT, ETH/USDT, HYPE/USDT are supported."""
-    _assert_has_active_subscription(current_user, db)
-    if payload.symbol not in MACD_ALLOWED_SYMBOLS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Symbol must be one of {MACD_ALLOWED_SYMBOLS}",
-        )
-    if payload.leverage <= 0:
-        raise HTTPException(status_code=400, detail="Leverage must be positive")
-    if payload.margin_per_trade <= 0:
-        raise HTTPException(status_code=400, detail="Margin per trade must be positive")
-
-    config = StrategyConfig(
-        user_id=current_user.id,
-        strategy_type="macd",
-        symbol=payload.symbol,
-        settings={
-            "margin_per_trade": str(payload.margin_per_trade),
-            "leverage": payload.leverage,
-            "rr_ratio": payload.rr_ratio,
-        },
-    )
-    db.add(config)
-    db.commit()
-    db.refresh(config)
-    return config
-
-
-@router.get("/macd-configs", response_model=List[StrategyConfigResponse])
-def list_macd_configs(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """List all MACD D1 bot configurations for the current user."""
-    return (
-        db.query(StrategyConfig)
-        .filter(
-            StrategyConfig.user_id == current_user.id,
-            StrategyConfig.strategy_type == "macd",
-        )
-        .all()
-    )
-
-
-@router.get("/macd-signal/{config_id}", response_model=MACDSignalResponse)
-def get_macd_signal_for_config(
-    config_id: int,
+@router.get("/signal/{strategy_id}", response_model=MACDSignalResponse)
+def get_signal(
+    strategy_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Return the latest D1 MACD signal for the given config.
+    Return the latest D1 MACD signal for a strategy's symbol.
 
-    The signal is served from the in-memory cache maintained by the
-    market_listener background worker (see workers/market_listener.py).
-    If the cache is empty (e.g. worker hasn't run yet) it falls back to a
-    live exchange fetch so the endpoint always returns useful data.
+    Served from the market-listener worker cache when available;
+    falls back to a live exchange fetch otherwise.
     """
     from app.workers.market_listener import LATEST_SIGNALS
 
-    config = _get_config_or_404(config_id, "macd", current_user.id, db)
+    strategy = _get_strategy_or_404(strategy_id, db)
 
-    # Try the worker cache first
-    signal = LATEST_SIGNALS.get(config.symbol)
-
-    # Fall back to a live fetch if the worker hasn't populated the cache yet
+    signal = LATEST_SIGNALS.get(strategy.symbol)
     if signal is None:
         try:
             exchange = exchange_service.get_default_exchange()
-            ohlcv = exchange.fetch_ohlcv(config.symbol, timeframe="1d", limit=60)
+            ohlcv = exchange.fetch_ohlcv(strategy.symbol, timeframe="1d", limit=60)
             closes = [candle[4] for candle in ohlcv]
             signal = get_macd_signal(closes) if len(closes) >= 35 else None
         except Exception:
@@ -308,7 +141,7 @@ def get_macd_signal_for_config(
         db.query(StrategyTrade)
         .filter(
             StrategyTrade.user_id == current_user.id,
-            StrategyTrade.config_id == config_id,
+            StrategyTrade.strategy_id == strategy_id,
             StrategyTrade.trade_date == today,
         )
         .order_by(StrategyTrade.created_at.asc())
@@ -317,7 +150,7 @@ def get_macd_signal_for_config(
     daily_status = check_daily_trade_status([t.status for t in today_trades])
 
     return MACDSignalResponse(
-        symbol=config.symbol,
+        symbol=strategy.symbol,
         macd=round(signal.macd, 6) if signal else 0.0,
         signal=round(signal.signal, 6) if signal else 0.0,
         histogram=round(signal.histogram, 6) if signal else 0.0,
@@ -329,30 +162,49 @@ def get_macd_signal_for_config(
     )
 
 
+# ---------------------------------------------------------------------------
+# Launch a trade — user supplies only margin; all params from AdminStrategy
+# ---------------------------------------------------------------------------
 
-@router.post("/macd-open/{config_id}", response_model=StrategyTradeResponse, status_code=status.HTTP_201_CREATED)
-def open_macd_trade(
-    config_id: int,
-    payload: MACDTradeOpen,
+@router.post("/launch", response_model=StrategyTradeResponse, status_code=status.HTTP_201_CREATED)
+def launch_trade(
+    payload: MACDTradeLaunchRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Open a MACD D1 trade.
+    Open a MACD D1 long trade.
 
-    - Entry #1 uses the D1 MACD signal timeframe.
-    - Entry #2 (after a win or loss) uses the 15m correction timeframe.
-    - Enforces the daily limit of 2 trades and maximum daily margin.
+    The user only provides:
+    - strategy_id  — which admin strategy to trade
+    - margin       — USDT margin to risk (must be ≤ wallet balance)
+    - entry_price  — the current mark/last price to compute TP and SL
+
+    All other parameters (leverage, rr_ratio, daily limits, symbol) come from
+    the AdminStrategy record, not from user input.
     """
-    _assert_has_active_subscription(current_user, db)
-    config = _get_config_or_404(config_id, "macd", current_user.id, db)
+    _assert_active_subscription(current_user, db)
+    strategy = _get_strategy_or_404(payload.strategy_id, db)
 
+    # --- Validate margin against wallet balance ---
+    wallet = db.query(Wallet).filter(Wallet.user_id == current_user.id).first()
+    available = Decimal(str(wallet.balance)) if wallet else Decimal("0")
+    margin = Decimal(str(payload.margin))
+    if margin <= Decimal("0"):
+        raise HTTPException(status_code=400, detail="Margin must be positive")
+    if margin > available:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient balance. Margin {margin} exceeds available {available} USDT",
+        )
+
+    # --- Enforce daily trade limits ---
     today = date.today()
     today_trades = (
         db.query(StrategyTrade)
         .filter(
             StrategyTrade.user_id == current_user.id,
-            StrategyTrade.config_id == config_id,
+            StrategyTrade.strategy_id == payload.strategy_id,
             StrategyTrade.trade_date == today,
         )
         .order_by(StrategyTrade.created_at.asc())
@@ -363,31 +215,48 @@ def open_macd_trade(
     if not daily_status.can_open_trade:
         raise HTTPException(status_code=400, detail=daily_status.reason)
 
+    # --- Enforce daily margin cap if set by admin ---
+    if strategy.max_daily_margin_usd > 0:
+        used_today = sum(
+            Decimal(str(t.details.get("margin", 0))) for t in today_trades
+        )
+        if (used_today + margin) > Decimal(str(strategy.max_daily_margin_usd)):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Daily margin cap of ${strategy.max_daily_margin_usd} would be exceeded. "
+                    f"Already used: ${used_today}"
+                ),
+            )
+
     entry_number = daily_status.next_entry_number
     timeframe = "d1" if entry_number == 1 else "15m"
 
-    margin = float(config.settings.get("margin_per_trade", 0))
-    leverage = float(config.settings.get("leverage", 20.0))
-    rr_ratio = float(config.settings.get("rr_ratio", 2.0))
+    leverage = strategy.leverage
+    rr_ratio = strategy.rr_ratio
+    margin_float = float(margin)
 
     tp = calculate_take_profit(
         entry_price=payload.entry_price,
-        margin=margin,
+        margin=margin_float,
         leverage=leverage,
         rr_ratio=rr_ratio,
     )
     sl = calculate_stop_loss(
         entry_price=payload.entry_price,
-        margin=margin,
+        margin=margin_float,
         leverage=leverage,
     )
 
+    # Resolve exchange from user's connected accounts
+    exchange_id = _resolve_exchange_id(current_user.id, db)
+
     trade = StrategyTrade(
         user_id=current_user.id,
-        config_id=config.id,
+        strategy_id=payload.strategy_id,
         strategy_type="macd",
-        symbol=config.symbol,
-        exchange="okx",
+        symbol=strategy.symbol,
+        exchange=exchange_id,
         status="open",
         trade_date=today,
         details={
@@ -396,8 +265,9 @@ def open_macd_trade(
             "entry_price": str(payload.entry_price),
             "take_profit_price": str(tp),
             "stop_loss_price": str(sl),
-            "margin": config.settings.get("margin_per_trade"),
+            "margin": str(margin),
             "leverage": leverage,
+            "rr_ratio": rr_ratio,
         },
     )
     db.add(trade)
@@ -406,8 +276,12 @@ def open_macd_trade(
     return trade
 
 
-@router.post("/macd-close/{trade_id}", response_model=StrategyTradeResponse)
-def close_macd_trade(
+# ---------------------------------------------------------------------------
+# Close a trade manually
+# ---------------------------------------------------------------------------
+
+@router.post("/close/{trade_id}", response_model=StrategyTradeResponse)
+def close_trade(
     trade_id: int,
     payload: MACDTradeClose,
     db: Session = Depends(get_db),
@@ -427,7 +301,7 @@ def close_macd_trade(
         .first()
     )
     if trade is None:
-        raise HTTPException(status_code=404, detail="MACD trade not found")
+        raise HTTPException(status_code=404, detail="Trade not found")
     if trade.status != "open":
         raise HTTPException(status_code=400, detail="Trade is already closed")
 
@@ -437,18 +311,19 @@ def close_macd_trade(
     return trade
 
 
-@router.get("/macd-trades", response_model=List[StrategyTradeResponse])
-def list_macd_trades(
+# ---------------------------------------------------------------------------
+# Trade history
+# ---------------------------------------------------------------------------
+
+@router.get("/trades", response_model=List[StrategyTradeResponse])
+def list_trades(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all MACD trades for the current user, most recent first."""
+    """Return all trades for the current user, most recent first."""
     return (
         db.query(StrategyTrade)
-        .filter(
-            StrategyTrade.user_id == current_user.id,
-            StrategyTrade.strategy_type == "macd",
-        )
+        .filter(StrategyTrade.user_id == current_user.id)
         .order_by(StrategyTrade.created_at.desc())
         .all()
     )

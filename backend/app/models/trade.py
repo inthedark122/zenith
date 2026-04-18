@@ -5,70 +5,34 @@ from sqlalchemy.orm import relationship
 
 from app.db.base import Base
 
-# Symbols supported by the MACD D1 strategy
-MACD_ALLOWED_SYMBOLS = ["BTC/USDT", "ETH/USDT", "HYPE/USDT"]
-
-STRATEGY_TYPES = ["dca", "macd"]
-
-
-class StrategyConfig(Base):
-    """
-    Unified configuration for all strategy bots (DCA, MACD, …).
-
-    Strategy-specific parameters are stored in the ``settings`` JSON column.
-
-    DCA settings keys:
-        base_amount, safety_order_multiplier, price_deviation, max_safety_orders
-
-    MACD settings keys:
-        margin_per_trade, leverage, rr_ratio
-    """
-
-    __tablename__ = "strategy_configs"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    strategy_type = Column(String, nullable=False)   # "dca" | "macd"
-    symbol = Column(String, nullable=False)
-    is_active = Column(Integer, default=0)           # 0=idle, 1=running
-    settings = Column(JSON, default=dict)            # strategy-specific params
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    user = relationship("User", back_populates="strategy_configs")
-    trades = relationship("StrategyTrade", back_populates="config")
-
 
 class StrategyTrade(Base):
     """
-    Unified trade record for all strategies (DCA, MACD, …).
+    Records every trade opened by a user.
 
-    Strategy-specific fields are stored in the ``details`` JSON column.
+    ``strategy_id``  — links to the AdminStrategy that was used.
+    ``strategy_type`` — denormalized for quick filtering (always "macd" currently).
+    ``exchange``     — resolved from the user's connected UserExchange at launch time.
+    ``details``      — JSON bag: entry_price, take_profit_price, stop_loss_price,
+                       margin, leverage, rr_ratio, entry_number, timeframe.
 
-    DCA details keys:
-        base_order_amount, safety_orders
-
-    MACD details keys:
-        timeframe, entry_number, entry_price, take_profit_price,
-        stop_loss_price, margin, leverage
+    Status lifecycle (MACD):
+        open → win  (TP hit, manually or by market_listener worker)
+        open → loss (SL hit, manually or by market_listener worker)
     """
 
     __tablename__ = "strategy_trades"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    config_id = Column(Integer, ForeignKey("strategy_configs.id"), nullable=True)
-    strategy_type = Column(String, nullable=False)   # "dca" | "macd"
+    strategy_id = Column(Integer, ForeignKey("admin_strategies.id"), nullable=True)
+    strategy_type = Column(String, nullable=False, default="macd")
     symbol = Column(String, nullable=False)
-    exchange = Column(String, default="okx")
-    # DCA: "active" / "completed" / "stopped"
-    # MACD: "open" / "win" / "loss"
-    status = Column(String, default="open")
-    trade_date = Column(Date, nullable=True)         # UTC date (MACD) or None (DCA)
-    details = Column(JSON, default=dict)             # strategy-specific trade data
+    exchange = Column(String, nullable=False)           # from user's UserExchange
+    status = Column(String, default="open")             # open / win / loss
+    trade_date = Column(Date, nullable=True)            # UTC calendar date
+    details = Column(JSON, default=dict)                # all trade-specific data
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user = relationship("User", back_populates="strategy_trades")
-    config = relationship("StrategyConfig", back_populates="trades")
-
