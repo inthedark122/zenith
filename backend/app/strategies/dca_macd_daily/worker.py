@@ -29,9 +29,9 @@ from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.trade import StrategyTrade
+from app.models.trade import StrategyTrade, TradeStatus
 from app.models.worker import StrategyWorker
-from app.services.macd_strategy import (
+from app.strategies.dca_macd_daily.strategy import (
     MACDSignal,
     calculate_stop_loss,
     calculate_take_profit,
@@ -64,6 +64,11 @@ def run_for_worker(
     today = date.today()
     margin = float(worker.margin)
 
+    # Read DCA_MACD_DAILY-specific settings from the Strategy.settings JSON field
+    settings = strategy.settings or {}
+    max_daily_trades: int = int(settings.get("max_daily_trades", 2))
+    max_daily_margin_usd: float = float(settings.get("max_daily_margin_usd", 0.0))
+
     # ------------------------------------------------------------------
     # 1.  Evaluate entry signals for each symbol
     # ------------------------------------------------------------------
@@ -85,11 +90,15 @@ def run_for_worker(
         )
         daily_status = check_daily_trade_status([t.status for t in today_trades])
 
+        # Enforce max_daily_trades from settings
+        if daily_status.trades_today >= max_daily_trades:
+            continue
+
         if not daily_status.can_open_trade:
             continue
 
-        # Check daily margin cap
-        if strategy.max_daily_margin_usd > 0:
+        # Check daily margin cap from settings
+        if max_daily_margin_usd > 0:
             used = 0.0
             for t in today_trades:
                 raw = t.details.get("margin")
@@ -100,10 +109,10 @@ def run_for_worker(
                     )
                     continue
                 used += float(raw)
-            if used + margin > strategy.max_daily_margin_usd:
+            if used + margin > max_daily_margin_usd:
                 log.debug(
                     "Worker #%d/%s: daily margin cap reached (%.2f/%.2f)",
-                    worker.id, symbol, used, strategy.max_daily_margin_usd,
+                    worker.id, symbol, used, max_daily_margin_usd,
                 )
                 continue
 
@@ -143,7 +152,7 @@ def run_for_worker(
             strategy_id=strategy.id,
             symbol=symbol,
             exchange=worker.exchange_id,
-            status="open",
+            status=TradeStatus.OPEN,
             trade_date=today,
             details={
                 "timeframe": timeframe,
@@ -169,7 +178,7 @@ def run_for_worker(
         db.query(StrategyTrade)
         .filter(
             StrategyTrade.worker_id == worker.id,
-            StrategyTrade.status == "open",
+            StrategyTrade.status == TradeStatus.OPEN,
         )
         .all()
     )
@@ -188,13 +197,13 @@ def run_for_worker(
         sl_price = float(sl_str)
 
         if current_price >= tp_price:
-            trade.status = "win"
+            trade.status = TradeStatus.WIN
             log.info(
                 "Worker #%d trade #%d (%s) HIT TP at %.4f (TP=%.4f)",
                 worker.id, trade.id, trade.symbol, current_price, tp_price,
             )
         elif current_price <= sl_price:
-            trade.status = "loss"
+            trade.status = TradeStatus.LOSS
             log.info(
                 "Worker #%d trade #%d (%s) HIT SL at %.4f (SL=%.4f)",
                 worker.id, trade.id, trade.symbol, current_price, sl_price,

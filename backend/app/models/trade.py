@@ -1,9 +1,17 @@
 from datetime import datetime
+from enum import Enum
 
 from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
+
+
+class TradeStatus(str, Enum):
+    OPEN = "open"
+    WIN = "win"
+    LOSS = "loss"
+    CLOSED = "closed"   # force-closed when the parent worker is stopped
 
 
 class StrategyTrade(Base):
@@ -39,7 +47,7 @@ class StrategyTrade(Base):
     strategy_id = Column(Integer, ForeignKey("strategies.id"), nullable=True)
     symbol = Column(String, nullable=False)
     exchange = Column(String, nullable=False)
-    status = Column(String, default="open")         # open / win / loss
+    status = Column(String, default=TradeStatus.OPEN)          # TradeStatus
     trade_date = Column(Date, nullable=True)
     details = Column(JSON, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow)

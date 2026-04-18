@@ -1,66 +1,74 @@
 """
-Exchange service wrapping ccxt for spot/futures trading.
+Exchange service wrapping ccxt.
 
-Users connect their own exchange credentials via the /exchanges API.
-``get_default_exchange`` returns an unauthenticated OKX instance for
-public market-data calls (OHLCV, ticker); OKX supports these without
-API credentials.
+Each ``ExchangeService`` instance represents one exchange connection.
+Use the class-method constructors:
+
+    ExchangeService.default()                    — unauthenticated OKX
+    ExchangeService.from_user_exchange(row)      — authenticated from DB row
+    ExchangeService(exchange_id, api_key, ...)   — explicit credentials
+
+OKX supports public OHLCV / ticker endpoints without credentials.
 """
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import ccxt
 
 
 class ExchangeService:
-    def get_exchange(
+    def __init__(
         self,
-        api_key: str,
-        api_secret: str,
-        passphrase: str = "",
         exchange_id: str = "okx",
-    ) -> ccxt.Exchange:
-        """Instantiate and return an authenticated ccxt exchange object."""
-        exchange_class = getattr(ccxt, exchange_id)
-        exchange: ccxt.Exchange = exchange_class(
-            {
-                "apiKey": api_key,
-                "secret": api_secret,
-                "password": passphrase,
-                "enableRateLimit": True,
-                "options": {"defaultType": "spot"},
-            }
-        )
-        return exchange
-
-    def get_default_exchange(self) -> ccxt.Exchange:
-        """
-        Return an unauthenticated OKX exchange for public market-data calls
-        (OHLCV, ticker).  OKX does not require API credentials for these.
-        """
-        exchange: ccxt.Exchange = ccxt.okx({"enableRateLimit": True})
-        return exchange
-
-    def get_user_exchange(self, user_exchange) -> ccxt.Exchange:
-        """
-        Build a ccxt exchange object from a UserExchange ORM row.
-        Raises ValueError if the exchange_id is not supported by ccxt.
-        """
-        exchange_id = user_exchange.exchange_id
+        api_key: Optional[str] = None,
+        api_secret: Optional[str] = None,
+        passphrase: str = "",
+    ) -> None:
         if not hasattr(ccxt, exchange_id):
             raise ValueError(f"Unsupported exchange: {exchange_id}")
-        return self.get_exchange(
+        exchange_class = getattr(ccxt, exchange_id)
+        config: Dict[str, Any] = {"enableRateLimit": True}
+        if api_key:
+            config["apiKey"] = api_key
+            config["secret"] = api_secret
+            config["password"] = passphrase
+        self.exchange: ccxt.Exchange = exchange_class(config)
+        self.exchange_id = exchange_id
+
+    # ------------------------------------------------------------------
+    # Constructors
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def default(cls) -> "ExchangeService":
+        """Unauthenticated OKX instance for public market-data calls."""
+        return cls(exchange_id="okx")
+
+    @classmethod
+    def from_user_exchange(cls, user_exchange) -> "ExchangeService":
+        """Build an authenticated instance from a UserExchange ORM row."""
+        return cls(
+            exchange_id=user_exchange.exchange_id,
             api_key=user_exchange.api_key,
             api_secret=user_exchange.api_secret,
             passphrase=user_exchange.passphrase or "",
-            exchange_id=exchange_id,
         )
 
-    def get_ticker(self, exchange: ccxt.Exchange, symbol: str) -> Dict[str, Any]:
+    # ------------------------------------------------------------------
+    # Market data
+    # ------------------------------------------------------------------
+
+    def fetch_ohlcv(
+        self, symbol: str, timeframe: str = "1d", limit: int = 60
+    ) -> List[List[Any]]:
+        """Fetch OHLCV candles for the given symbol and timeframe."""
+        return self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+
+    def fetch_ticker(self, symbol: str) -> Dict[str, Any]:
         """
         Fetch ticker data for a symbol.
         Returns dict with keys: symbol, last, bid, ask, high, low, volume, timestamp.
         """
-        ticker = exchange.fetch_ticker(symbol)
+        ticker = self.exchange.fetch_ticker(symbol)
         return {
             "symbol": ticker["symbol"],
             "last": ticker["last"],
@@ -72,46 +80,33 @@ class ExchangeService:
             "timestamp": ticker["timestamp"],
         }
 
-    def place_spot_order(
+    # ------------------------------------------------------------------
+    # Account / orders
+    # ------------------------------------------------------------------
+
+    def get_balance(self, currency: str = "USDT") -> float:
+        """Return the free balance for the given currency."""
+        balance = self.exchange.fetch_balance()
+        return balance.get("free", {}).get(currency, 0.0)
+
+    def place_order(
         self,
-        exchange: ccxt.Exchange,
         symbol: str,
-        order_type: str,   # "market" or "limit"
-        side: str,         # "buy" or "sell"
+        order_type: str,
+        side: str,
         amount: float,
         price: Optional[float] = None,
     ) -> Dict[str, Any]:
-        """
-        Place a spot order on the exchange.
-
-        For limit orders, `price` is required.
-        Returns the raw order dict from ccxt.
-        """
+        """Place an order on the exchange.  price is required for limit orders."""
         if order_type == "limit" and price is None:
             raise ValueError("Price is required for limit orders")
+        return self.exchange.create_order(symbol, order_type, side, amount, price)
 
-        order = exchange.create_order(
-            symbol=symbol,
-            type=order_type,
-            side=side,
-            amount=amount,
-            price=price,
-        )
-        return order
-
-    def get_balance(self, exchange: ccxt.Exchange, currency: str = "USDT") -> float:
-        """Return the free balance for the given currency."""
-        balance = exchange.fetch_balance()
-        return balance.get("free", {}).get(currency, 0.0)
-
-    def get_open_orders(self, exchange: ccxt.Exchange, symbol: str) -> list:
+    def get_open_orders(self, symbol: str) -> list:
         """Return all open orders for a symbol."""
-        return exchange.fetch_open_orders(symbol)
+        return self.exchange.fetch_open_orders(symbol)
 
-    def cancel_order(self, exchange: ccxt.Exchange, order_id: str, symbol: str) -> Dict[str, Any]:
+    def cancel_order(self, order_id: str, symbol: str) -> Dict[str, Any]:
         """Cancel an open order."""
-        return exchange.cancel_order(order_id, symbol)
-
-
-exchange_service = ExchangeService()
+        return self.exchange.cancel_order(order_id, symbol)
 

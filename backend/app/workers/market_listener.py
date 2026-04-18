@@ -34,9 +34,9 @@ from typing import Dict, Optional
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.strategy import STRATEGY_DCA_MACD_DAILY, Strategy
-from app.models.worker import StrategyWorker
-from app.services.exchange import exchange_service
-from app.services.macd_strategy import MACDSignal, get_macd_signal
+from app.models.worker import StrategyWorker, WorkerStatus
+from app.services.exchange import ExchangeService
+from app.strategies.dca_macd_daily.strategy import MACDSignal, get_macd_signal
 from app.strategies.dca_macd_daily import worker as dca_macd_daily_worker
 
 log = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ async def _refresh_signals(symbols: set) -> None:
     if not symbols:
         return
     try:
-        exchange = exchange_service.get_default_exchange()
+        exc_service = ExchangeService.default()
     except Exception as exc:
         log.warning("Cannot initialise default exchange for MACD refresh: %s", exc)
         return
@@ -84,7 +84,7 @@ async def _refresh_signals(symbols: set) -> None:
     for symbol in symbols:
         try:
             ohlcv = await asyncio.to_thread(
-                exchange.fetch_ohlcv, symbol, "1d", limit=60
+                exc_service.fetch_ohlcv, symbol, "1d", 60
             )
             closes = [candle[4] for candle in ohlcv]
             signal = get_macd_signal(closes) if len(closes) >= 35 else None
@@ -104,7 +104,7 @@ async def _fetch_prices(symbols: set) -> Dict[str, float]:
     if not symbols:
         return {}
     try:
-        exchange = exchange_service.get_default_exchange()
+        exc_service = ExchangeService.default()
     except Exception as exc:
         log.warning("Cannot initialise exchange for price fetch: %s", exc)
         return {}
@@ -112,7 +112,7 @@ async def _fetch_prices(symbols: set) -> Dict[str, float]:
     prices: Dict[str, float] = {}
     for sym in symbols:
         try:
-            ticker = await asyncio.to_thread(exchange_service.get_ticker, exchange, sym)
+            ticker = await asyncio.to_thread(exc_service.fetch_ticker, sym)
             prices[sym] = ticker["last"]
         except Exception as exc:
             log.warning("Cannot fetch ticker for %s: %s", sym, exc)
@@ -131,7 +131,7 @@ async def _dispatch_strategy_workers(
     try:
         running_workers = (
             db.query(StrategyWorker)
-            .filter(StrategyWorker.status == "running")
+            .filter(StrategyWorker.status == WorkerStatus.RUNNING)
             .all()
         )
 

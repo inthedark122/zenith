@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, field_validator
 
@@ -12,8 +12,9 @@ class StrategyCreate(BaseModel):
     symbols: List[str]
     leverage: float = 20.0
     rr_ratio: float = 2.0
-    max_daily_trades: int = 2
-    max_daily_margin_usd: float = 0.0
+    # Strategy-specific configuration — keys depend on the strategy implementation.
+    # DCA_MACD_DAILY accepts: {"max_daily_trades": int, "max_daily_margin_usd": float}
+    settings: Dict[str, Any] = {}
     is_active: bool = True
 
     @field_validator("strategy")
@@ -52,8 +53,7 @@ class StrategyUpdate(BaseModel):
     symbols: Optional[List[str]] = None
     leverage: Optional[float] = None
     rr_ratio: Optional[float] = None
-    max_daily_trades: Optional[int] = None
-    max_daily_margin_usd: Optional[float] = None
+    settings: Optional[Dict[str, Any]] = None
     is_active: Optional[bool] = None
 
 
@@ -64,8 +64,7 @@ class StrategyResponse(BaseModel):
     symbols: List[str]
     leverage: float
     rr_ratio: float
-    max_daily_trades: int
-    max_daily_margin_usd: float
+    settings: Dict[str, Any]
     is_active: bool
     created_at: datetime
     updated_at: datetime

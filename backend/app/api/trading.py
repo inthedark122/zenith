@@ -8,7 +8,8 @@ Design
 * Users browse active strategies via GET /trading/strategies.
 * Users start a StrategyWorker via POST /trading/launch (supplying only margin).
   The worker runs autonomously — it opens and closes trades without user input.
-* Users can stop a running worker via POST /trading/stop/{worker_id}.
+* Users can force-stop a running worker via POST /trading/stop/{worker_id};
+  all open trades under that worker are force-closed (status → "closed").
 * GET /trading/workers   — lists the user's workers.
 * GET /trading/trades    — read-only trade history (created only by workers).
 * GET /trading/signal/{strategy_id} — cached D1 MACD signal.
@@ -16,14 +17,13 @@ Design
 Subscription restrictions
 --------------------------
 * Users must have an active subscription to start a worker.
-* ``starter`` plan → max 1 running worker, symbols limited to subscription.coins
-* ``trader``  plan → max 2 running workers
-* ``pro``     plan → max 3 running workers (unrestricted symbols)
+* The number of concurrently running workers is limited by the subscription plan
+  (starter → 1 token, trader → 2 tokens, pro → 3 tokens).
 """
 
-from datetime import date
+from datetime import datetime
 from decimal import Decimal
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -32,20 +32,19 @@ from app.core.deps import get_current_user, get_db
 from app.models.exchange import UserExchange
 from app.models.strategy import Strategy
 from app.models.subscription import Subscription
-from app.models.trade import StrategyTrade
+from app.models.trade import StrategyTrade, TradeStatus
 from app.models.user import User
-from app.models.wallet import Wallet
-from app.models.worker import StrategyWorker
+from app.models.worker import StrategyWorker, WorkerStatus
 from app.schemas.strategy import StrategyResponse
 from app.schemas.trade import MACDSignalResponse, StrategyTradeResponse
-from app.schemas.worker import WorkerLaunchRequest, WorkerResponse
-from app.services.exchange import exchange_service
-from app.services.macd_strategy import check_daily_trade_status, get_macd_signal
+from app.schemas.worker import WorkerLaunchRequest, WorkerResponse, WorkerStopResponse
+from app.services.exchange import ExchangeService
+from app.strategies.dca_macd_daily.strategy import check_daily_trade_status, get_macd_signal
 
 router = APIRouter(prefix="/trading", tags=["trading"])
 
-# Concurrent worker limits per plan
-_PLAN_MAX_WORKERS = {
+# Concurrent token (worker) limits per plan
+_PLAN_MAX_TOKENS = {
     "starter": 1,
     "trader": 2,
     "pro": 3,
@@ -81,14 +80,13 @@ def _get_strategy_or_404(strategy_id: int, db: Session) -> Strategy:
     return strategy
 
 
-def _resolve_exchange_id(user_id: int, db: Session) -> str:
-    exc = (
+def _resolve_user_exchange(user_id: int, db: Session) -> Optional[UserExchange]:
+    return (
         db.query(UserExchange)
         .filter(UserExchange.user_id == user_id)
         .order_by(UserExchange.is_default.desc(), UserExchange.created_at.asc())
         .first()
     )
-    return exc.exchange_id if exc else "okx"
 
 
 # ---------------------------------------------------------------------------
@@ -128,20 +126,19 @@ def get_signal(
 
     strategy = _get_strategy_or_404(strategy_id, db)
     symbols = strategy.symbols or []
-    # Use the first symbol as the representative signal
     symbol = symbols[0] if symbols else None
 
     signal = LATEST_SIGNALS.get(symbol) if symbol else None
     if signal is None and symbol:
         try:
-            exchange = exchange_service.get_default_exchange()
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe="1d", limit=60)
+            exc_service = ExchangeService.default()
+            ohlcv = exc_service.fetch_ohlcv(symbol, timeframe="1d", limit=60)
             closes = [candle[4] for candle in ohlcv]
             signal = get_macd_signal(closes) if len(closes) >= 35 else None
         except Exception:
             signal = None
 
-    # Daily trade status for the user across this strategy today
+    from datetime import date
     today = date.today()
     today_trades = (
         db.query(StrategyTrade)
@@ -182,75 +179,71 @@ def launch_worker(
     """
     Start a strategy worker for the authenticated user.
 
-    The worker runs autonomously in the background.  It reads the Strategy
+    The worker runs autonomously in the background. It reads the Strategy
     config, polls market signals via the orchestrator, and opens / closes
     trades on the user's behalf — without any further user interaction.
 
     Validation:
     - Active subscription required.
-    - Margin must be > 0 and ≤ wallet balance.
-    - Subscription plan limits the number of concurrent running workers.
-    - Subscription coins must overlap with the strategy's symbols (starter/trader plans).
+    - Subscription plan limits concurrent active tokens (running workers).
+    - Margin must be > 0; validated against the user's exchange balance when
+      a connected exchange is available.
     """
+    # 1. Active subscription gate
     sub = _get_active_subscription_or_403(current_user, db)
     strategy = _get_strategy_or_404(payload.strategy_id, db)
 
-    # --- Validate margin ---
-    wallet = db.query(Wallet).filter(Wallet.user_id == current_user.id).first()
-    available = Decimal(str(wallet.balance)) if wallet else Decimal("0")
-    margin = Decimal(str(payload.margin))
-    if margin <= Decimal("0"):
-        raise HTTPException(status_code=400, detail="Margin must be positive")
-    if margin > available:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Insufficient balance: margin {margin} USDT > available {available} USDT",
-        )
-
-    # --- Subscription plan: concurrent worker limit ---
-    max_workers = _PLAN_MAX_WORKERS.get(sub.plan, 1)
+    # 2. Plan-based concurrent token limit
+    max_tokens = _PLAN_MAX_TOKENS.get(sub.plan, 1)
     running_count = (
         db.query(StrategyWorker)
         .filter(
             StrategyWorker.user_id == current_user.id,
-            StrategyWorker.status == "running",
+            StrategyWorker.status == WorkerStatus.RUNNING,
         )
         .count()
     )
-    if running_count >= max_workers:
+    if running_count >= max_tokens:
         raise HTTPException(
             status_code=403,
             detail=(
-                f"Your '{sub.plan}' plan allows at most {max_workers} running "
-                f"worker(s). Stop an existing worker before starting a new one."
+                f"Your '{sub.plan}' plan allows trading at most {max_tokens} "
+                f"token(s) concurrently. Stop an existing worker before starting a new one."
             ),
         )
 
-    # --- Subscription plan: symbol access ---
-    # An empty coins list means the plan has unrestricted symbol access (e.g. pro).
-    sub_coins = sub.coins or []
-    if sub_coins:  # non-empty → subscription is restricted to specific coins
-        allowed = set(sub_coins)
-        strategy_symbols = set(strategy.symbols or [])
-        if not strategy_symbols.intersection(allowed):
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    f"None of the strategy's symbols {sorted(strategy_symbols)} "
-                    f"are included in your subscription ({sorted(allowed)}). "
-                    "Upgrade your plan or choose a different strategy."
-                ),
-            )
+    # 3. Validate margin: check against exchange balance if possible
+    margin = Decimal(str(payload.margin))
+    if margin <= Decimal("0"):
+        raise HTTPException(status_code=400, detail="Margin must be positive")
 
-    # --- Resolve exchange ---
-    exchange_id = _resolve_exchange_id(current_user.id, db)
+    user_exchange_row = _resolve_user_exchange(current_user.id, db)
+    exchange_id = user_exchange_row.exchange_id if user_exchange_row else "okx"
+
+    if user_exchange_row:
+        try:
+            exc_service = ExchangeService.from_user_exchange(user_exchange_row)
+            available = Decimal(str(exc_service.get_balance("USDT")))
+            if margin > available:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Insufficient exchange balance: margin {margin} USDT "
+                        f"> available {available} USDT on {exchange_id}"
+                    ),
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            # Balance fetch failed (e.g. wrong credentials) — proceed without blocking
+            pass
 
     worker = StrategyWorker(
         user_id=current_user.id,
         strategy_id=payload.strategy_id,
         margin=margin,
         exchange_id=exchange_id,
-        status="running",
+        status=WorkerStatus.RUNNING,
     )
     db.add(worker)
     db.commit()
@@ -259,16 +252,21 @@ def launch_worker(
 
 
 # ---------------------------------------------------------------------------
-# Stop a strategy worker
+# Force-stop a strategy worker
 # ---------------------------------------------------------------------------
 
-@router.post("/stop/{worker_id}", response_model=WorkerResponse)
+@router.post("/stop/{worker_id}", response_model=WorkerStopResponse)
 def stop_worker(
     worker_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Stop a running strategy worker. Open trades are NOT force-closed."""
+    """
+    Force-stop a running strategy worker.
+
+    All open trades belonging to this worker are force-closed (status → "closed").
+    The response includes the number of trades that were closed.
+    """
     worker = (
         db.query(StrategyWorker)
         .filter(
@@ -279,14 +277,36 @@ def stop_worker(
     )
     if worker is None:
         raise HTTPException(status_code=404, detail="Worker not found")
-    if worker.status != "running":
+    if worker.status != WorkerStatus.RUNNING:
         raise HTTPException(status_code=400, detail="Worker is not running")
 
-    worker.status = "stopped"
+    # Force-close all open trades under this worker
+    open_trades = (
+        db.query(StrategyTrade)
+        .filter(
+            StrategyTrade.worker_id == worker.id,
+            StrategyTrade.status == TradeStatus.OPEN,
+        )
+        .all()
+    )
+    for trade in open_trades:
+        trade.status = TradeStatus.CLOSED
+
+    worker.status = WorkerStatus.STOPPED
     worker.stopped_at = datetime.utcnow()
     db.commit()
     db.refresh(worker)
-    return worker
+
+    closed_count = len(open_trades)
+    return WorkerStopResponse(
+        **WorkerResponse.model_validate(worker).model_dump(),
+        closed_trades_count=closed_count,
+        message=(
+            f"Worker stopped. {closed_count} open trade(s) were force-closed."
+            if closed_count
+            else "Worker stopped. No open trades to close."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

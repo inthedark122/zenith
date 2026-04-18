@@ -197,7 +197,8 @@ def check_daily_trade_status(
                 next_entry_number=2,
                 reason="First trade still open — close it before opening entry #2",
             )
-        if result in ("win", "loss"):
+        if result in ("win", "loss", "closed"):
+            # "closed" means force-stopped — treated as a completed entry
             label = "follow-up" if result == "win" else "recovery (15 m correction)"
             return DailyTradeStatus(
                 trades_today=1,

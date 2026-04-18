@@ -1,9 +1,15 @@
 from datetime import datetime
+from enum import Enum
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
+
+
+class WorkerStatus(str, Enum):
+    RUNNING = "running"
+    STOPPED = "stopped"
 
 
 class StrategyWorker(Base):
@@ -41,7 +47,7 @@ class StrategyWorker(Base):
     strategy_id = Column(Integer, ForeignKey("strategies.id"), nullable=False)
     margin = Column(Numeric(18, 8), nullable=False)
     exchange_id = Column(String, nullable=False)
-    status = Column(String, default="running")      # "running" | "stopped"
+    status = Column(String, default=WorkerStatus.RUNNING)      # WorkerStatus
     started_at = Column(DateTime, default=datetime.utcnow)
     stopped_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

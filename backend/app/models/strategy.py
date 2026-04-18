@@ -39,8 +39,9 @@ class Strategy(Base):
     symbols = Column(JSON, nullable=False, default=list)   # e.g. ["BTC/USDT", "ETH/USDT"]
     leverage = Column(Float, nullable=False, default=20.0)
     rr_ratio = Column(Float, nullable=False, default=2.0)
-    max_daily_trades = Column(Integer, nullable=False, default=2)
-    max_daily_margin_usd = Column(Float, nullable=False, default=0.0)
+    # Strategy-specific configuration; keys vary per strategy implementation.
+    # DCA_MACD_DAILY default: {"max_daily_trades": 2, "max_daily_margin_usd": 0.0}
+    settings = Column(JSON, nullable=False, default=dict)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
