@@ -15,7 +15,7 @@ export default function Referral() {
     <div className="min-h-screen bg-[#0a0a0a] pb-20">
       <div className="flex items-center gap-3 px-5 pt-6 pb-2">
         <button className="bg-none border-none text-white text-2xl cursor-pointer" onClick={() => navigate(-1)}>←</button>
-        <div className="text-white text-xl font-bold">Invite &amp; Earn</div>
+        <div className="text-white text-xl font-bold">Invite & Earn</div>
       </div>
 
       <div className="flex flex-col items-center px-5 py-6">
