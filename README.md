@@ -38,7 +38,7 @@ zenith/
 │       ├── models/   # ORM models
 │       ├── schemas/  # Pydantic DTOs
 │       └── services/ # Business logic (DCA, MLM, wallet, exchange)
-├── frontend/         # React 18 · Vite · Zustand · React Query
+├── frontend/         # React 18 · Vite · TypeScript · Zustand · React Query
 │   └── src/
 │       ├── api/      # Axios client
 │       ├── components/ # Shared components (BottomNav, Layout)
@@ -120,9 +120,16 @@ cp .env.example .env   # edit as needed
 uvicorn app.main:app --reload
 
 # Frontend
+
 cd frontend
 npm install
 npm run dev
+
+# Type-check
+npm run typecheck
+
+# Lint (run after making changes)
+npm run lint
 ```
 
 ---
