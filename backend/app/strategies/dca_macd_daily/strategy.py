@@ -17,10 +17,13 @@ Strategy rules:
   - Max daily margin  : 2 × margin_per_trade (e.g. $10 × 2 = $20)
 """
 
+import threading
+import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, ROUND_DOWN
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # EMA / MACD helpers (pure Python — no external TA library needed)
@@ -219,3 +222,61 @@ def check_daily_trade_status(
         next_entry_number=3,
         reason="Daily trade limit reached (max 2 entries per day)",
     )
+
+
+# ---------------------------------------------------------------------------
+# LRU signal cache
+# Stores MACD signals keyed by (exchange, symbol, strategy, timeframe).
+# Each strategy module keeps its own cache instance.
+# ---------------------------------------------------------------------------
+
+_CacheKey = Tuple[str, str, str, str]
+_CacheEntry = Tuple[Optional["MACDSignal"], float]  # (signal, unix_timestamp)
+
+
+class SignalCache:
+    """Thread-safe LRU cache with TTL for MACD signals.
+
+    Key: (exchange_id, symbol, strategy_name, timeframe)
+    """
+
+    def __init__(self, maxsize: int = 128, ttl: int = 300) -> None:
+        self._cache: OrderedDict[_CacheKey, _CacheEntry] = OrderedDict()
+        self.maxsize = maxsize
+        self.ttl = ttl
+        self._lock = threading.Lock()
+
+    def get(
+        self, exchange: str, symbol: str, strategy: str, timeframe: str
+    ) -> Optional["MACDSignal"]:
+        key: _CacheKey = (exchange, symbol, strategy, timeframe)
+        with self._lock:
+            if key not in self._cache:
+                return None
+            value, ts = self._cache[key]
+            if time.time() - ts > self.ttl:
+                del self._cache[key]
+                return None
+            self._cache.move_to_end(key)
+            return value
+
+    def set(
+        self,
+        exchange: str,
+        symbol: str,
+        strategy: str,
+        timeframe: str,
+        signal: Optional["MACDSignal"],
+    ) -> None:
+        key: _CacheKey = (exchange, symbol, strategy, timeframe)
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+            self._cache[key] = (signal, time.time())
+            while len(self._cache) > self.maxsize:
+                self._cache.popitem(last=False)
+
+
+# Module-level cache instance used by the DCA_MACD_DAILY strategy
+STRATEGY_NAME = "DCA_MACD_DAILY"
+signal_cache = SignalCache(maxsize=128, ttl=300)

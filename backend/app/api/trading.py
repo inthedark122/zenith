@@ -25,6 +25,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional
 
+import ccxt
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -38,8 +39,12 @@ from app.models.worker import StrategyWorker, WorkerStatus
 from app.schemas.strategy import StrategyResponse
 from app.schemas.trade import MACDSignalResponse, StrategyTradeResponse
 from app.schemas.worker import WorkerLaunchRequest, WorkerResponse, WorkerStopResponse
-from app.services.exchange import ExchangeService
-from app.strategies.dca_macd_daily.strategy import check_daily_trade_status, get_macd_signal
+from app.strategies.dca_macd_daily.strategy import (
+    STRATEGY_NAME as DCA_MACD_DAILY_STRATEGY_NAME,
+    check_daily_trade_status,
+    get_macd_signal,
+    signal_cache as dca_signal_cache,
+)
 
 router = APIRouter(prefix="/trading", tags=["trading"])
 
@@ -121,19 +126,17 @@ def get_signal(
     """
     Return the latest D1 MACD signal for the first symbol of the strategy.
 
-    Served from the market-listener worker cache; falls back to a live fetch.
+    Served from the strategy's LRU signal cache; falls back to a live fetch.
     """
-    from app.workers.market_listener import LATEST_SIGNALS
-
     strategy = _get_strategy_or_404(strategy_id, db)
     symbols = strategy.symbols or []
     symbol = symbols[0] if symbols else None
 
-    signal = LATEST_SIGNALS.get(symbol) if symbol else None
+    signal = dca_signal_cache.get("okx", symbol, DCA_MACD_DAILY_STRATEGY_NAME, "1d") if symbol else None
     if signal is None and symbol:
         try:
-            exc_service = ExchangeService.default()
-            ohlcv = exc_service.fetch_ohlcv(symbol, timeframe="1d", limit=60)
+            exchange = ccxt.okx({"enableRateLimit": True})
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe="1d", limit=60)
             closes = [candle[4] for candle in ohlcv]
             signal = get_macd_signal(closes) if len(closes) >= 35 else None
         except Exception:
@@ -222,16 +225,24 @@ def launch_worker(
 
     if user_exchange_row:
         try:
-            exc_service = ExchangeService.from_user_exchange(user_exchange_row)
-            available = Decimal(str(exc_service.get_balance("USDT")))
-            if margin > available:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"Insufficient exchange balance: margin {margin} USDT "
-                        f"> available {available} USDT on {exchange_id}"
-                    ),
-                )
+            exchange_cls = getattr(ccxt, user_exchange_row.exchange_id, None)
+            if exchange_cls is not None:
+                exchange = exchange_cls({
+                    "enableRateLimit": True,
+                    "apiKey": user_exchange_row.api_key,
+                    "secret": user_exchange_row.api_secret,
+                    "password": user_exchange_row.passphrase or "",
+                })
+                balance = exchange.fetch_balance()
+                available = Decimal(str(balance.get("free", {}).get("USDT", 0.0)))
+                if margin > available:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Insufficient exchange balance: margin {margin} USDT "
+                            f"> available {available} USDT on {exchange_id}"
+                        ),
+                    )
         except HTTPException:
             raise
         except Exception:

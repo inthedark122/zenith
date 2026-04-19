@@ -7,7 +7,8 @@ application.  It is responsible for two things:
 
 1. **Signal cache refresh** — polls D1 OHLCV from the exchange every
    ``MARKET_POLL_INTERVAL`` seconds for all symbols referenced by any
-   active Strategy record and stores the result in ``LATEST_SIGNALS``.
+   active Strategy record and stores the result in the strategy's
+   ``signal_cache`` (LRU cache keyed by exchange-symbol-strategy-timeframe).
 
 2. **Strategy worker dispatch** — for every *running* StrategyWorker,
    calls the matching strategy-implementation module so it can evaluate
@@ -31,23 +32,21 @@ import asyncio
 import logging
 from typing import Dict, Optional
 
+import ccxt
+
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.strategy import STRATEGY_DCA_MACD_DAILY, Strategy
 from app.models.worker import StrategyWorker, WorkerStatus
-from app.services.exchange import ExchangeService
-from app.strategies.dca_macd_daily.strategy import MACDSignal, get_macd_signal
+from app.strategies.dca_macd_daily.strategy import (
+    STRATEGY_NAME as DCA_MACD_DAILY_STRATEGY_NAME,
+    MACDSignal,
+    get_macd_signal,
+    signal_cache as dca_signal_cache,
+)
 from app.strategies.dca_macd_daily import worker as dca_macd_daily_worker
 
 log = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Shared MACD signal cache
-# Populated by the orchestrator; read by strategy workers and API handlers.
-# Dict[symbol, MACDSignal | None]
-# ---------------------------------------------------------------------------
-LATEST_SIGNALS: Dict[str, Optional[MACDSignal]] = {}
-_signals_lock = asyncio.Lock()
 
 MARKET_POLL_INTERVAL: int = settings.MARKET_POLL_INTERVAL
 
@@ -55,6 +54,9 @@ MARKET_POLL_INTERVAL: int = settings.MARKET_POLL_INTERVAL
 _STRATEGY_IMPL = {
     STRATEGY_DCA_MACD_DAILY: dca_macd_daily_worker,
 }
+
+# Source exchange for public market data
+_PUBLIC_EXCHANGE_ID = "okx"
 
 
 # ---------------------------------------------------------------------------
@@ -72,24 +74,23 @@ def _collect_symbols(db) -> set:
 
 
 async def _refresh_signals(symbols: set) -> None:
-    """Fetch D1 OHLCV for each symbol and update LATEST_SIGNALS."""
+    """Fetch D1 OHLCV for each symbol and update the strategy LRU signal cache."""
     if not symbols:
         return
     try:
-        exc_service = ExchangeService.default()
+        exchange = ccxt.okx({"enableRateLimit": True})
     except Exception as exc:
-        log.warning("Cannot initialise default exchange for MACD refresh: %s", exc)
+        log.warning("Cannot initialise OKX exchange for MACD refresh: %s", exc)
         return
 
     for symbol in symbols:
         try:
             ohlcv = await asyncio.to_thread(
-                exc_service.fetch_ohlcv, symbol, "1d", 60
+                exchange.fetch_ohlcv, symbol, "1d", 60
             )
             closes = [candle[4] for candle in ohlcv]
             signal = get_macd_signal(closes) if len(closes) >= 35 else None
-            async with _signals_lock:
-                LATEST_SIGNALS[symbol] = signal
+            dca_signal_cache.set(_PUBLIC_EXCHANGE_ID, symbol, DCA_MACD_DAILY_STRATEGY_NAME, "1d", signal)
             if signal:
                 log.debug(
                     "%s MACD signal: macd=%.4f signal=%.4f bull=%s",
@@ -104,19 +105,27 @@ async def _fetch_prices(symbols: set) -> Dict[str, float]:
     if not symbols:
         return {}
     try:
-        exc_service = ExchangeService.default()
+        exchange = ccxt.okx({"enableRateLimit": True})
     except Exception as exc:
-        log.warning("Cannot initialise exchange for price fetch: %s", exc)
+        log.warning("Cannot initialise OKX exchange for price fetch: %s", exc)
         return {}
 
     prices: Dict[str, float] = {}
     for sym in symbols:
         try:
-            ticker = await asyncio.to_thread(exc_service.fetch_ticker, sym)
+            ticker = await asyncio.to_thread(exchange.fetch_ticker, sym)
             prices[sym] = ticker["last"]
         except Exception as exc:
             log.warning("Cannot fetch ticker for %s: %s", sym, exc)
     return prices
+
+
+def _build_signals_snapshot(symbols: set) -> Dict[str, Optional[MACDSignal]]:
+    """Read the current LRU cache state for all active symbols."""
+    return {
+        sym: dca_signal_cache.get(_PUBLIC_EXCHANGE_ID, sym, DCA_MACD_DAILY_STRATEGY_NAME, "1d")
+        for sym in symbols
+    }
 
 
 async def _dispatch_strategy_workers(
@@ -187,7 +196,8 @@ async def market_listener_loop() -> None:
         if symbols:
             await _refresh_signals(symbols)
             prices = await _fetch_prices(symbols)
-            await _dispatch_strategy_workers(dict(LATEST_SIGNALS), prices)
+            signals = _build_signals_snapshot(symbols)
+            await _dispatch_strategy_workers(signals, prices)
         else:
             log.debug("No active strategies — skipping market poll")
 
