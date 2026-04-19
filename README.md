@@ -117,6 +117,7 @@ cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # edit as needed
+alembic upgrade head
 uvicorn app.main:app --reload
 
 # Frontend
@@ -170,4 +171,3 @@ Key endpoints:
 | `OKX_API_SECRET`            | OKX exchange API secret                       |
 | `OKX_PASSPHRASE`            | OKX exchange passphrase                       |
 | `USDT_DEPOSIT_ADDRESS`      | Platform USDT deposit wallet address          |
-

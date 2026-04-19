@@ -79,6 +79,8 @@ Repeat the steps below **twice**: once for the `development` project and once fo
 
 Railway will inject `DATABASE_URL` into the backend container on every deployment.
 
+The backend container runs `alembic upgrade head` before starting Uvicorn, so schema changes are applied during deployment instead of being created implicitly in app startup.
+
 ### 3.5 Add the frontend service
 
 1. Click **+ New** → **GitHub Repo** (same repository).
@@ -255,6 +257,12 @@ Railway → Service → Deployments → Redeploy
 
 - Open the **BackEnd** service → **Variables** tab and confirm `DATABASE_URL` is listed (it should be referenced from the **Postgres** service, not typed manually).
 - If missing, click **+ Add Reference** → select the **Postgres** service → select `DATABASE_URL`.
+
+### Backend fails during migration
+
+- The backend deploy runs `alembic upgrade head` before starting the API.
+- Open the **BackEnd** service logs and look for Alembic errors before Uvicorn startup.
+- If the database already exists but the schema is out of sync, fix the migration state first instead of relying on app startup to create tables.
 
 ### Crypto deposits are disabled
 

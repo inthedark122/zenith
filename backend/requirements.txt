@@ -7,7 +7,7 @@ pydantic==2.7.0
 pydantic-settings==2.2.1
 email-validator==2.3.0
 python-jose[cryptography]==3.4.0
-passlib[bcrypt]==1.7.4
+bcrypt==5.0.0
 python-multipart==0.0.22
 ccxt==4.2.95
 web3==6.15.1
