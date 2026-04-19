@@ -1,7 +1,13 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
+import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
 import { useExchanges, useSupportedExchanges, useAddExchange, useRemoveExchange } from '../hooks/useExchanges'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 
 export default function Exchanges() {
   const navigate = useNavigate()
@@ -29,114 +35,129 @@ export default function Exchanges() {
     removeExchange.mutate(exchangeId)
   }
 
-  const inputClass = 'w-full bg-[#1e1e1e] border border-[#333] rounded-lg px-3 py-2.5 text-white text-sm outline-none mb-3'
-  const labelClass = 'block text-[#aaa] text-xs mb-1'
-
   return (
-    <div className="min-h-screen bg-[#0a0a0a] pb-24">
+    <div className="min-h-screen bg-background pb-24">
       <div className="flex items-center gap-3 px-5 pt-6 pb-4">
-        <button className="bg-transparent border-none text-white text-2xl cursor-pointer" onClick={() => navigate(-1)}>←</button>
-        <div className="text-white text-lg font-semibold">Exchange Connections</div>
+        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+          <ArrowLeft size={20} />
+        </Button>
+        <h1 className="text-foreground text-lg font-semibold">Exchange Connections</h1>
       </div>
 
       {removeExchange.error && (
-        <div className="text-[#f87171] text-xs mx-5 mb-3">
+        <p className="text-destructive text-xs mx-5 mb-3">
           {removeExchange.error.response?.data?.detail || 'Failed to remove exchange'}
-        </div>
+        </p>
       )}
 
       {exchanges.length === 0 ? (
-        <div className="text-center text-[#555] py-8 px-5 text-sm">No exchanges connected yet.</div>
+        <p className="text-center text-muted-foreground py-8 px-5 text-sm">No exchanges connected yet.</p>
       ) : (
         exchanges.map((exc) => (
-          <div key={exc.exchange_id} className="mx-5 mb-3 bg-[#141414] rounded-xl p-4 border border-[#222]">
+          <Card key={exc.exchange_id} className="mx-5 mb-3 p-4">
             <div className="flex justify-between items-start">
               <div>
-                <div className="text-white font-bold text-sm">
+                <div className="text-foreground font-bold text-sm flex items-center gap-2">
                   {exc.exchange_id.toUpperCase()}
                   {exc.is_default && (
-                    <span className="ml-2 text-[10px] bg-[rgba(108,71,255,0.2)] text-[#a78bfa] rounded-md px-2 py-0.5 font-semibold">DEFAULT</span>
+                    <Badge variant="default" className="text-[10px]">DEFAULT</Badge>
                   )}
                 </div>
-                {exc.label && <div className="text-[#888] text-xs mt-0.5">{exc.label}</div>}
-                <div className="text-[#555] text-xs mt-1">Key: ••••{exc.api_key?.slice(-4) || '••••'}</div>
+                {exc.label && <div className="text-muted-foreground text-xs mt-0.5">{exc.label}</div>}
+                <div className="text-muted-foreground text-xs mt-1">Key: ••••{exc.api_key?.slice(-4) || '••••'}</div>
               </div>
-              <button
+              <Button
+                variant="danger"
+                size="sm"
                 onClick={() => handleDelete(exc.exchange_id)}
                 disabled={removeExchange.isPending}
-                className="text-[#f87171] text-xs bg-[rgba(248,113,113,0.1)] border border-[#f87171] rounded-lg px-3 py-1.5 cursor-pointer disabled:opacity-50"
               >
+                <Trash2 size={14} />
                 Remove
-              </button>
+              </Button>
             </div>
-          </div>
+          </Card>
         ))
       )}
 
       {!showForm && (
         <div className="mx-5 mt-2">
-          <button
-            onClick={() => setShowForm(true)}
-            className="w-full bg-gradient-to-r from-[#6c47ff] to-[#a78bfa] border-none rounded-xl text-white py-3.5 font-semibold text-sm cursor-pointer"
-          >
-            + Connect Exchange
-          </button>
+          <Button size="lg" className="w-full" onClick={() => setShowForm(true)}>
+            <Plus size={16} />
+            Connect Exchange
+          </Button>
         </div>
       )}
 
       {showForm && (
-        <form onSubmit={handleSubmit(onSubmit)} className="mx-5 mt-4 bg-[#141414] rounded-xl p-5 border border-[#222]">
-          <div className="text-white font-semibold text-sm mb-4">Connect New Exchange</div>
+        <Card className="mx-5 mt-4 p-5">
+          <h2 className="text-foreground font-semibold text-sm mb-4">Connect New Exchange</h2>
 
           {addExchange.error && (
-            <div className="text-[#f87171] text-xs mb-3">
+            <p className="text-destructive text-xs mb-3">
               {addExchange.error.response?.data?.detail || 'Failed to connect exchange'}
-            </div>
+            </p>
           )}
 
-          <label className={labelClass}>Exchange *</label>
-          <select
-            className={inputClass + ' appearance-none'}
-            {...register('exchange_id', { required: 'Select an exchange' })}
-          >
-            <option value="">Select exchange…</option>
-            {supported.map((id) => (
-              <option key={id} value={id}>{id.toUpperCase()}</option>
-            ))}
-          </select>
-          {errors.exchange_id && <div className="text-[#f87171] text-xs -mt-2 mb-2">{errors.exchange_id.message}</div>}
+          <form onSubmit={handleSubmit(onSubmit)}>
+            <div className="mb-3">
+              <Label htmlFor="exchange_id">Exchange *</Label>
+              <select
+                id="exchange_id"
+                className="flex h-10 w-full rounded-lg border border-border bg-input px-3.5 py-2 text-sm text-foreground outline-none appearance-none focus-visible:ring-2 focus-visible:ring-ring mt-1.5"
+                {...register('exchange_id', { required: 'Select an exchange' })}
+              >
+                <option value="">Select exchange…</option>
+                {supported.map((id) => (
+                  <option key={id} value={id}>{id.toUpperCase()}</option>
+                ))}
+              </select>
+              {errors.exchange_id && <p className="text-destructive text-xs mt-1">{errors.exchange_id.message}</p>}
+            </div>
 
-          <label className={labelClass}>Label (optional)</label>
-          <input className={inputClass} placeholder="e.g. My OKX Account" {...register('label')} />
+            <div className="mb-3">
+              <Label htmlFor="label">Label (optional)</Label>
+              <Input id="label" className="mt-1.5" placeholder="e.g. My OKX Account" {...register('label')} />
+            </div>
 
-          <label className={labelClass}>API Key *</label>
-          <input className={inputClass} placeholder="API key" {...register('api_key', { required: 'API Key is required' })} />
-          {errors.api_key && <div className="text-[#f87171] text-xs -mt-2 mb-2">{errors.api_key.message}</div>}
+            <div className="mb-3">
+              <Label htmlFor="api_key">API Key *</Label>
+              <Input id="api_key" className="mt-1.5" placeholder="API key" {...register('api_key', { required: 'API Key is required' })} />
+              {errors.api_key && <p className="text-destructive text-xs mt-1">{errors.api_key.message}</p>}
+            </div>
 
-          <label className={labelClass}>API Secret *</label>
-          <input className={inputClass} type="password" placeholder="API secret" {...register('api_secret', { required: 'API Secret is required' })} />
-          {errors.api_secret && <div className="text-[#f87171] text-xs -mt-2 mb-2">{errors.api_secret.message}</div>}
+            <div className="mb-3">
+              <Label htmlFor="api_secret">API Secret *</Label>
+              <Input id="api_secret" type="password" className="mt-1.5" placeholder="API secret" {...register('api_secret', { required: 'API Secret is required' })} />
+              {errors.api_secret && <p className="text-destructive text-xs mt-1">{errors.api_secret.message}</p>}
+            </div>
 
-          <label className={labelClass}>Passphrase (if required)</label>
-          <input className={inputClass} type="password" placeholder="Passphrase (OKX)" {...register('passphrase')} />
+            <div className="mb-4">
+              <Label htmlFor="passphrase">Passphrase (if required)</Label>
+              <Input id="passphrase" type="password" className="mt-1.5" placeholder="Passphrase (OKX)" {...register('passphrase')} />
+            </div>
 
-          <div className="flex gap-3 mt-1">
-            <button
-              type="button"
-              onClick={() => { setShowForm(false); reset() }}
-              className="flex-1 bg-[#1e1e1e] border border-[#333] rounded-xl text-[#aaa] py-3 font-semibold text-sm cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={addExchange.isPending}
-              className="flex-1 bg-gradient-to-r from-[#6c47ff] to-[#a78bfa] border-none rounded-xl text-white py-3 font-semibold text-sm cursor-pointer disabled:opacity-50"
-            >
-              {addExchange.isPending ? 'Connecting…' : 'Connect'}
-            </button>
-          </div>
-        </form>
+            <div className="flex gap-3 mt-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                className="flex-1"
+                onClick={() => { setShowForm(false); reset() }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="lg"
+                disabled={addExchange.isPending}
+                className="flex-1"
+              >
+                {addExchange.isPending ? 'Connecting…' : 'Connect'}
+              </Button>
+            </div>
+          </form>
+        </Card>
       )}
     </div>
   )

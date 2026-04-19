@@ -1,11 +1,13 @@
 import { useNavigate, useLocation } from 'react-router-dom'
+import { Home, Search, Zap, MessageCircle, User } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 const navItems = [
-  { icon: '🏠', label: 'Home', path: '/home' },
-  { icon: '🔍', label: 'Discover', path: '#' },
-  { icon: '⚡', label: 'Zenith', path: '/trading', center: true },
-  { icon: '💬', label: 'Live Chat', path: '#' },
-  { icon: '👤', label: 'User', path: '/user' },
+  { icon: Home, label: 'Home', path: '/home' },
+  { icon: Search, label: 'Discover', path: '#' },
+  { icon: Zap, label: 'Zenith', path: '/trading', center: true },
+  { icon: MessageCircle, label: 'Live Chat', path: '#' },
+  { icon: User, label: 'User', path: '/user' },
 ]
 
 export default function BottomNav() {
@@ -13,9 +15,10 @@ export default function BottomNav() {
   const location = useLocation()
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-[#111] border-t border-[#222] flex justify-around items-center px-0 py-2 pb-[calc(8px+env(safe-area-inset-bottom))] z-[100]">
+    <nav className="fixed bottom-0 left-0 right-0 bg-card border-t border-border flex justify-around items-center px-0 py-2 pb-[calc(8px+env(safe-area-inset-bottom))] z-[100]">
       {navItems.map((item) => {
         const active = location.pathname === item.path
+        const Icon = item.icon
         return (
           <div
             key={item.label}
@@ -23,13 +26,13 @@ export default function BottomNav() {
             onClick={() => item.path !== '#' && navigate(item.path)}
           >
             {item.center ? (
-              <div className="text-[22px] bg-gradient-to-br from-[#6c47ff] to-[#a78bfa] w-[52px] h-[52px] rounded-full flex items-center justify-center -mt-5 shadow-[0_4px_20px_rgba(108,71,255,0.5)]">
-                {item.icon}
+              <div className="bg-gradient-to-br from-[#6c47ff] to-[#a78bfa] w-[52px] h-[52px] rounded-full flex items-center justify-center -mt-5 shadow-[0_4px_20px_rgba(108,71,255,0.5)]">
+                <Icon size={22} className="text-white" />
               </div>
             ) : (
-              <div className="text-[20px]">{item.icon}</div>
+              <Icon size={20} className={active ? 'text-[#a78bfa]' : 'text-muted-foreground'} />
             )}
-            <span className={active ? 'text-[10px] font-semibold text-[#a78bfa]' : 'text-[10px] font-normal text-[#555]'}>
+            <span className={cn('text-[10px]', active ? 'font-semibold text-[#a78bfa]' : 'font-normal text-muted-foreground')}>
               {item.label}
             </span>
           </div>

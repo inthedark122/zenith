@@ -1,15 +1,20 @@
 import { useNavigate } from 'react-router-dom'
+import { Wallet, Link2, Gem, Users, Gift, Megaphone, HelpCircle, ChevronRight, Copy, User, LogOut } from 'lucide-react'
 import useAuthStore from '../store/authStore'
 import { useMySubs } from '../hooks/useSubscriptions'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Separator } from '@/components/ui/separator'
 
 const menuItems = [
-  { icon: '💼', label: 'My Wallets', path: '/wallets' },
-  { icon: '🔗', label: 'Exchanges', path: '/exchanges' },
-  { icon: '💎', label: 'Subscriptions', path: '/subscriptions' },
-  { icon: '👥', label: 'My Community', path: '/referral' },
-  { icon: '🎁', label: 'Referral', path: '/referral' },
-  { icon: '📢', label: 'Announcements', path: '#' },
-  { icon: '❓', label: 'Help and Support', path: '#' },
+  { icon: Wallet, label: 'My Wallets', path: '/wallets' },
+  { icon: Link2, label: 'Exchanges', path: '/exchanges' },
+  { icon: Gem, label: 'Subscriptions', path: '/subscriptions' },
+  { icon: Users, label: 'My Community', path: '/referral' },
+  { icon: Gift, label: 'Referral', path: '/referral' },
+  { icon: Megaphone, label: 'Announcements', path: '#' },
+  { icon: HelpCircle, label: 'Help and Support', path: '#' },
 ]
 
 export default function UserCenter() {
@@ -26,57 +31,80 @@ export default function UserCenter() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] pb-20">
+    <div className="min-h-screen bg-background pb-20">
       <div className="flex flex-col items-center px-5 pt-10 pb-6">
-        <div className="w-20 h-20 bg-gradient-to-br from-[#6c47ff] to-[#a78bfa] rounded-full flex items-center justify-center text-4xl mb-3">👤</div>
-        <div className="text-white text-xl font-bold mb-1">{user?.username || 'User'}</div>
-        <div className="text-[#888] text-sm">{user?.email}</div>
+        <div className="w-20 h-20 bg-gradient-to-br from-[#6c47ff] to-[#a78bfa] rounded-full flex items-center justify-center mb-3">
+          <User size={40} className="text-white" />
+        </div>
+        <h1 className="text-foreground text-xl font-bold mb-1">{user?.username || 'User'}</h1>
+        <p className="text-muted-foreground text-sm">{user?.email}</p>
         {activeSub && (
-          <div className="mt-2.5 bg-[rgba(108,71,255,0.15)] border border-[#6c47ff] rounded-full px-3.5 py-1 text-[#a78bfa] text-xs font-semibold">
+          <Badge variant="default" className="mt-2.5 rounded-full">
             {activeSub.plan.charAt(0).toUpperCase() + activeSub.plan.slice(1)} Plan Active
-          </div>
+          </Badge>
         )}
       </div>
 
-      <div className="mx-5 mb-5 bg-[#141414] rounded-[14px] p-4 border border-[#222]">
-        <div className="flex justify-between items-center py-2.5 border-b border-[#1a1a1a]">
-          <div className="text-[#888] text-sm">UID</div>
-          <div className="text-white text-sm flex items-center gap-2">
-            {user?.id}
-            <button className="bg-[#222] border border-[#333] rounded-md text-[#a78bfa] text-[11px] px-2 py-0.5 cursor-pointer" onClick={() => copy(String(user?.id))}>Copy</button>
-          </div>
-        </div>
+      <Card className="mx-5 mb-5 p-4">
         <div className="flex justify-between items-center py-2.5">
-          <div className="text-[#888] text-sm">Referral Code</div>
-          <div className="text-white text-sm flex items-center gap-2">
-            {user?.referral_code}
-            <button className="bg-[#222] border border-[#333] rounded-md text-[#a78bfa] text-[11px] px-2 py-0.5 cursor-pointer" onClick={() => copy(user?.referral_code)}>Copy</button>
+          <span className="text-muted-foreground text-sm">UID</span>
+          <div className="text-foreground text-sm flex items-center gap-2">
+            {user?.id}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-[11px] text-[#a78bfa]"
+              onClick={() => copy(String(user?.id))}
+            >
+              <Copy size={10} className="mr-1" />Copy
+            </Button>
           </div>
         </div>
-      </div>
+        <Separator />
+        <div className="flex justify-between items-center py-2.5">
+          <span className="text-muted-foreground text-sm">Referral Code</span>
+          <div className="text-foreground text-sm flex items-center gap-2">
+            {user?.referral_code}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-[11px] text-[#a78bfa]"
+              onClick={() => copy(user?.referral_code)}
+            >
+              <Copy size={10} className="mr-1" />Copy
+            </Button>
+          </div>
+        </div>
+      </Card>
 
       <div className="mx-5">
-        {menuItems.map((item) => (
-          <div
-            key={item.label}
-            className="flex justify-between items-center bg-[#141414] rounded-xl p-4 mb-2 cursor-pointer border border-[#222]"
-            onClick={() => navigate(item.path)}
-          >
-            <div className="flex items-center gap-3">
-              <div className="text-xl">{item.icon}</div>
-              <div className="text-white text-base">{item.label}</div>
-            </div>
-            <div className="text-[#555] text-lg">›</div>
-          </div>
-        ))}
+        {menuItems.map((item) => {
+          const Icon = item.icon
+          return (
+            <Card
+              key={item.label}
+              className="flex justify-between items-center p-4 mb-2 cursor-pointer hover:border-[#333] transition-colors"
+              onClick={() => navigate(item.path)}
+            >
+              <div className="flex items-center gap-3">
+                <Icon size={20} className="text-[#a78bfa]" />
+                <span className="text-foreground text-base">{item.label}</span>
+              </div>
+              <ChevronRight size={18} className="text-muted-foreground" />
+            </Card>
+          )
+        })}
       </div>
 
-      <button
-        className="mx-5 mt-4 w-[calc(100%-40px)] bg-transparent border border-[#f87171] rounded-xl text-[#f87171] py-3.5 text-base cursor-pointer"
+      <Button
+        variant="danger"
+        size="lg"
+        className="mx-5 mt-4 w-[calc(100%-40px)]"
         onClick={handleLogout}
       >
+        <LogOut size={16} />
         Log Out
-      </button>
+      </Button>
     </div>
   )
 }
