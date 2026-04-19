@@ -1,11 +1,33 @@
 @import "tailwindcss";
 
 @theme {
+  --color-background: oklch(9.8% 0 0);
+  --color-foreground: oklch(98% 0 0);
+  --color-card: oklch(12% 0 0);
+  --color-card-foreground: oklch(98% 0 0);
+  --color-popover: oklch(12% 0 0);
+  --color-popover-foreground: oklch(98% 0 0);
+  --color-primary: oklch(61% 0.25 293);
+  --color-primary-foreground: oklch(98% 0 0);
+  --color-secondary: oklch(20% 0 0);
+  --color-secondary-foreground: oklch(70% 0 0);
+  --color-muted: oklch(20% 0 0);
+  --color-muted-foreground: oklch(55% 0 0);
+  --color-accent: oklch(20% 0 0);
+  --color-accent-foreground: oklch(98% 0 0);
+  --color-destructive: oklch(65% 0.22 25);
+  --color-destructive-foreground: oklch(98% 0 0);
+  --color-border: oklch(20% 0 0);
+  --color-input: oklch(16% 0 0);
+  --color-ring: oklch(61% 0.25 293);
+  --color-success: oklch(74% 0.15 163);
+  --color-warning: oklch(82% 0.17 86);
+
   --color-surface: #141414;
-  --color-border: #222;
-  --color-muted: #555;
-  --color-accent: #a78bfa;
   --color-accent-dark: #6c47ff;
+  --color-accent-light: #a78bfa;
+
+  --radius: 0.625rem;
 }
 
 /* Global resets */
@@ -16,6 +38,6 @@
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: #0a0a0a;
-  color: #fff;
+  background: var(--color-background);
+  color: var(--color-foreground);
 }
