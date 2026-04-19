@@ -1,5 +1,7 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAuthStore from '../store/authStore'
+import client from '../api/client'
 
 const s = {
   page: { minHeight: '100vh', background: '#0a0a0a', paddingBottom: '80px' },
@@ -23,6 +25,8 @@ const s = {
 
 const menuItems = [
   { icon: '💼', label: 'My Wallets', path: '/wallets' },
+  { icon: '🔗', label: 'Exchanges', path: '/exchanges' },
+  { icon: '💎', label: 'Subscriptions', path: '/subscriptions' },
   { icon: '👥', label: 'My Community', path: '/referral' },
   { icon: '🎁', label: 'Referral', path: '/referral' },
   { icon: '📢', label: 'Announcements', path: '#' },
@@ -32,6 +36,13 @@ const menuItems = [
 export default function UserCenter() {
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
+  const [activeSub, setActiveSub] = useState(null)
+
+  useEffect(() => {
+    client.get('/subscriptions/me')
+      .then((r) => setActiveSub(r.data.find((s) => s.status === 'active') || null))
+      .catch(() => {})
+  }, [])
 
   const copy = (text) => navigator.clipboard.writeText(text).catch(() => {})
 
@@ -46,6 +57,11 @@ export default function UserCenter() {
         <div style={s.avatar}>👤</div>
         <div style={s.username}>{user?.username || 'User'}</div>
         <div style={s.email}>{user?.email}</div>
+        {activeSub && (
+          <div style={{ marginTop: '10px', background: 'rgba(108,71,255,0.15)', border: '1px solid #6c47ff', borderRadius: '20px', padding: '4px 14px', color: '#a78bfa', fontSize: '12px', fontWeight: '600' }}>
+            {activeSub.plan.charAt(0).toUpperCase() + activeSub.plan.slice(1)} Plan Active
+          </div>
+        )}
       </div>
 
       <div style={s.infoCard}>

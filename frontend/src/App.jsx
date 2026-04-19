@@ -7,6 +7,8 @@ import Wallets from './pages/Wallets'
 import UserCenter from './pages/UserCenter'
 import Referral from './pages/Referral'
 import Trading from './pages/Trading'
+import Exchanges from './pages/Exchanges'
+import Subscriptions from './pages/Subscriptions'
 import Layout from './components/Layout'
 
 function PrivateRoute({ children }) {
@@ -67,6 +69,26 @@ export default function App() {
           <PrivateRoute>
             <Layout>
               <Trading />
+            </Layout>
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/exchanges"
+        element={
+          <PrivateRoute>
+            <Layout>
+              <Exchanges />
+            </Layout>
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/subscriptions"
+        element={
+          <PrivateRoute>
+            <Layout>
+              <Subscriptions />
             </Layout>
           </PrivateRoute>
         }

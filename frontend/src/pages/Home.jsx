@@ -1,5 +1,7 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAuthStore from '../store/authStore'
+import client from '../api/client'
 
 const s = {
   page: { minHeight: '100vh', background: '#0a0a0a', paddingBottom: '80px' },
@@ -20,19 +22,24 @@ const s = {
 }
 
 const menuItems = [
-  { icon: '🔗', label: 'Bind API', path: '/trading' },
+  { icon: '🔗', label: 'Bind API', path: '/exchanges' },
   { icon: '📖', label: 'API Tutorial', path: '#' },
   { icon: '📊', label: 'Overview', path: '/trading' },
   { icon: '🏆', label: 'Rankings', path: '#' },
   { icon: '⚙️', label: 'Setting', path: '#' },
   { icon: '👥', label: 'Referral', path: '/referral' },
   { icon: '💰', label: 'Wallets', path: '/wallets' },
-  { icon: '•••', label: 'More', path: '#' },
+  { icon: '💎', label: 'Subscribe', path: '/subscriptions' },
 ]
 
 export default function Home() {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
+  const [plans, setPlans] = useState([])
+
+  useEffect(() => {
+    client.get('/subscriptions/plans').then((r) => setPlans(r.data)).catch(() => {})
+  }, [])
 
   return (
     <div style={s.page}>
@@ -60,17 +67,13 @@ export default function Home() {
 
       <div style={s.sectionTitle}>Subscription Plans</div>
       <div style={s.subscriptionCard}>
-        {[
-          { name: 'Starter', coins: '1 Coin', price: '$15/mo' },
-          { name: 'Pro', coins: '2 Coins', price: '$20/mo' },
-          { name: 'Elite', coins: '3 Coins', price: '$25/mo' },
-        ].map((plan) => (
-          <div key={plan.name} style={s.planRow}>
+        {plans.map((plan) => (
+          <div key={plan.plan} style={s.planRow}>
             <div>
-              <div style={s.planName}>{plan.name}</div>
-              <div style={s.planDetail}>{plan.coins} • DCA Strategy</div>
+              <div style={s.planName}>{plan.plan.charAt(0).toUpperCase() + plan.plan.slice(1)}</div>
+              <div style={s.planDetail}>{plan.coins} Coin{plan.coins > 1 ? 's' : ''} • {plan.description}</div>
             </div>
-            <div style={s.planPrice}>{plan.price}</div>
+            <div style={s.planPrice}>${plan.price}/mo</div>
           </div>
         ))}
         <div style={{ color: '#888', fontSize: '12px', marginTop: '12px' }}>
@@ -78,13 +81,13 @@ export default function Home() {
         </div>
       </div>
 
-      <div style={s.sectionTitle}>DCA Strategy</div>
+      <div style={s.sectionTitle}>DCA_MACD_DAILY Strategy</div>
       <div style={{ margin: '0 20px', background: '#141414', borderRadius: '14px', padding: '20px', border: '1px solid #333' }}>
         {[
-          { label: 'Order Multiplier', value: '2×' },
-          { label: 'Price Deviation', value: '4%' },
-          { label: 'Safety Orders', value: '6 max' },
-          { label: 'Market', value: 'SPOT only' },
+          { label: 'Timeframe', value: 'Daily (D1)' },
+          { label: 'Signal', value: 'MACD Bullish Crossover' },
+          { label: 'Direction', value: 'Long only' },
+          { label: 'Risk:Reward', value: '1:2' },
         ].map((row) => (
           <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #1a1a1a' }}>
             <span style={{ color: '#888', fontSize: '14px' }}>{row.label}</span>

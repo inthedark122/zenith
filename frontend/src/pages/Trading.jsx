@@ -50,8 +50,10 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
     }
   }
 
-  const maxMargin = strategy.max_daily_margin_usd > 0
-    ? Math.min(walletBalance, strategy.max_daily_margin_usd)
+  const maxDailyMargin = strategy.settings?.max_daily_margin_usd ?? 0
+  const maxDailyTrades = strategy.settings?.max_daily_trades ?? 2
+  const maxMargin = maxDailyMargin > 0
+    ? Math.min(walletBalance, maxDailyMargin)
     : walletBalance
 
   return (
@@ -72,7 +74,7 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
             <div>R:R</div>
           </div>
           <div className="text-center">
-            <div className="text-white font-semibold text-sm">{strategy.max_daily_trades}</div>
+            <div className="text-white font-semibold text-sm">{maxDailyTrades}</div>
             <div>Max/day</div>
           </div>
         </div>
@@ -94,9 +96,9 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
           • Worker runs automatically in the background<br />
           • D1 MACD bullish crossover → opens a Long trade<br />
           • Risk/Reward 1:{strategy.rr_ratio} · Worker auto-closes at TP or SL<br />
-          • Max {strategy.max_daily_trades} entries per day per symbol
-          {strategy.max_daily_margin_usd > 0 && (
-            <><br />• Max daily margin: ${strategy.max_daily_margin_usd}</>
+          • Max {maxDailyTrades} entries per day per symbol
+          {maxDailyMargin > 0 && (
+            <><br />• Max daily margin: ${maxDailyMargin}</>
           )}
         </div>
       </div>
