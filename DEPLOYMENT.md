@@ -68,7 +68,7 @@ Repeat the steps below **twice**: once for the `development` project and once fo
 ### 3.3 Add the backend service
 
 1. Click **+ New** → **GitHub Repo**.
-2. Select this repository (`inthedark122/zenith`).
+2. Select this repository (`livectar/zenith`).
 3. Set **Root Directory** to `backend`.
 4. Railway detects `backend/Dockerfile` automatically.
 5. Name the service `backend`.
