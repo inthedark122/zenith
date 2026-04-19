@@ -1,6 +1,12 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-surface: #141414;
+  --color-border: #222;
+  --color-muted: #555;
+  --color-accent: #a78bfa;
+  --color-accent-dark: #6c47ff;
+}
 
 /* Global resets */
 * {
