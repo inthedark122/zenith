@@ -110,7 +110,7 @@ Set variables directly in the Railway dashboard under each service's **Variables
 
 | Variable | Value |
 |----------|-------|
-| `BACKEND_URL` | The public URL of the **backend** service in the same Railway project, e.g. `https://backend-production-xxxx.up.railway.app` (no trailing slash). Find it in the backend service → **Settings** → **Domains**. |
+| `BACKEND_URL` | Prefer the Railway private backend URL, e.g. `http://backend.railway.internal:8080`. If you use a public URL instead, nginx-to-backend proxying may fail. |
 
 > The frontend container listens on port `80`. Do not append a port to the public URL.
 
@@ -235,7 +235,7 @@ Railway → Service → Deployments → Redeploy
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `BACKEND_URL` | ✅ | — | Public URL of the backend service (no trailing slash) |
+| `BACKEND_URL` | ✅ | — | Backend base URL used by frontend nginx; prefer `http://backend.railway.internal:8080` on Railway |
 | `PORT` | | *(auto-injected)* | HTTP port — Railway injects this automatically |
 
 ## 10. Troubleshooting
@@ -248,7 +248,7 @@ Railway → Service → Deployments → Redeploy
 
 ### Frontend returns 502 on `/api/` routes
 
-- Confirm `BACKEND_URL` in the **FrontEnd** service's Railway variables is the correct public URL of the **BackEnd** service, with no trailing slash.
+- Confirm `BACKEND_URL` in the **FrontEnd** service's Railway variables points to the backend service. On Railway, prefer `http://backend.railway.internal:8080`.
 - Check that the backend service is in **Active** status in the Railway dashboard.
 
 ### Backend fails to start: database connection error
