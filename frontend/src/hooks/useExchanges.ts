@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient , useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { exchangesApi } from '../api/exchanges'
 import { AddExchangePayload } from '../types'
