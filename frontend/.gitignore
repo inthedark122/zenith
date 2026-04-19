@@ -1,0 +1,18 @@
+# Build output
+dist/
+dist-ssr/
+*.tsbuildinfo
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+
+# Editor
+.DS_Store
+.vscode/
+
+# Environment
+.env.local
+.env.production
