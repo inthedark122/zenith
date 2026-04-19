@@ -1,25 +1,6 @@
-import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAuthStore from '../store/authStore'
-import client from '../api/client'
-
-const s = {
-  page: { minHeight: '100vh', background: '#0a0a0a', paddingBottom: '80px' },
-  header: { padding: '24px 20px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  logo: { display: 'flex', alignItems: 'center', gap: '10px' },
-  logoIcon: { width: '40px', height: '40px', background: 'linear-gradient(135deg, #6c47ff 0%, #a78bfa 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' },
-  logoText: { fontSize: '22px', fontWeight: '700', color: '#fff' },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', padding: '16px 20px' },
-  tile: { background: '#141414', borderRadius: '14px', padding: '18px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', cursor: 'pointer', border: '1px solid #222' },
-  tileIcon: { fontSize: '26px' },
-  tileLabel: { fontSize: '11px', color: '#aaa', textAlign: 'center', lineHeight: '1.3' },
-  sectionTitle: { color: '#fff', fontSize: '16px', fontWeight: '600', padding: '16px 20px 8px' },
-  subscriptionCard: { margin: '0 20px', background: '#141414', borderRadius: '14px', padding: '20px', border: '1px solid #333' },
-  planRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #222' },
-  planName: { color: '#fff', fontWeight: '600' },
-  planPrice: { color: '#a78bfa', fontWeight: '700' },
-  planDetail: { color: '#888', fontSize: '12px' },
-}
+import { usePlans } from '../hooks/useSubscriptions'
 
 const menuItems = [
   { icon: '🔗', label: 'Bind API', path: '/exchanges' },
@@ -35,63 +16,61 @@ const menuItems = [
 export default function Home() {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
-  const [plans, setPlans] = useState([])
-
-  useEffect(() => {
-    client.get('/subscriptions/plans').then((r) => setPlans(r.data)).catch(() => {})
-  }, [])
+  const { data: plans = [] } = usePlans()
 
   return (
-    <div style={s.page}>
-      <div style={s.header}>
-        <div style={s.logo}>
-          <div style={s.logoIcon}>⚡</div>
-          <div style={s.logoText}>ZenithCrypto</div>
+    <div className="min-h-screen bg-[#0a0a0a] pb-20">
+      <div className="px-5 pt-6 pb-4 flex items-center justify-center">
+        <div className="flex items-center gap-2.5">
+          <div className="w-10 h-10 bg-gradient-to-br from-[#6c47ff] to-[#a78bfa] rounded-full flex items-center justify-center text-xl">⚡</div>
+          <div className="text-white text-[22px] font-bold">ZenithCrypto</div>
         </div>
       </div>
 
       {user && (
-        <div style={{ padding: '0 20px 12px', color: '#aaa', fontSize: '14px' }}>
-          Welcome back, <span style={{ color: '#a78bfa', fontWeight: '600' }}>{user.username}</span>
+        <div className="px-5 pb-3 text-[#aaa] text-sm">
+          Welcome back, <span className="text-[#a78bfa] font-semibold">{user.username}</span>
         </div>
       )}
 
-      <div style={s.grid}>
+      <div className="grid grid-cols-4 gap-3 px-5 py-4">
         {menuItems.map((item) => (
-          <div key={item.label} style={s.tile} onClick={() => navigate(item.path)}>
-            <div style={s.tileIcon}>{item.icon}</div>
-            <div style={s.tileLabel}>{item.label}</div>
+          <div
+            key={item.label}
+            className="bg-[#141414] rounded-[14px] p-4 flex flex-col items-center gap-2 cursor-pointer border border-[#222]"
+            onClick={() => navigate(item.path)}
+          >
+            <div className="text-2xl">{item.icon}</div>
+            <div className="text-[11px] text-[#aaa] text-center leading-tight">{item.label}</div>
           </div>
         ))}
       </div>
 
-      <div style={s.sectionTitle}>Subscription Plans</div>
-      <div style={s.subscriptionCard}>
+      <div className="text-white text-base font-semibold px-5 pb-2 pt-2">Subscription Plans</div>
+      <div className="mx-5 bg-[#141414] rounded-[14px] p-5 border border-[#333]">
         {plans.map((plan) => (
-          <div key={plan.plan} style={s.planRow}>
+          <div key={plan.plan} className="flex justify-between items-center py-3 border-b border-[#222] last:border-b-0">
             <div>
-              <div style={s.planName}>{plan.plan.charAt(0).toUpperCase() + plan.plan.slice(1)}</div>
-              <div style={s.planDetail}>{plan.coins} Coin{plan.coins > 1 ? 's' : ''} • {plan.description}</div>
+              <div className="text-white font-semibold">{plan.plan.charAt(0).toUpperCase() + plan.plan.slice(1)}</div>
+              <div className="text-[#888] text-xs">{plan.coins} Coin{plan.coins > 1 ? 's' : ''} • {plan.description}</div>
             </div>
-            <div style={s.planPrice}>${plan.price}/mo</div>
+            <div className="text-[#a78bfa] font-bold">${plan.price}/mo</div>
           </div>
         ))}
-        <div style={{ color: '#888', fontSize: '12px', marginTop: '12px' }}>
-          Capital is free — pay only for your subscription
-        </div>
+        <div className="text-[#888] text-xs mt-3">Capital is free — pay only for your subscription</div>
       </div>
 
-      <div style={s.sectionTitle}>DCA_MACD_DAILY Strategy</div>
-      <div style={{ margin: '0 20px', background: '#141414', borderRadius: '14px', padding: '20px', border: '1px solid #333' }}>
+      <div className="text-white text-base font-semibold px-5 pt-5 pb-2">DCA_MACD_DAILY Strategy</div>
+      <div className="mx-5 bg-[#141414] rounded-[14px] p-5 border border-[#333]">
         {[
           { label: 'Timeframe', value: 'Daily (D1)' },
           { label: 'Signal', value: 'MACD Bullish Crossover' },
           { label: 'Direction', value: 'Long only' },
           { label: 'Risk:Reward', value: '1:2' },
         ].map((row) => (
-          <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #1a1a1a' }}>
-            <span style={{ color: '#888', fontSize: '14px' }}>{row.label}</span>
-            <span style={{ color: '#fff', fontWeight: '600', fontSize: '14px' }}>{row.value}</span>
+          <div key={row.label} className="flex justify-between py-2 border-b border-[#1a1a1a] last:border-b-0">
+            <span className="text-[#888] text-sm">{row.label}</span>
+            <span className="text-white font-semibold text-sm">{row.value}</span>
           </div>
         ))}
       </div>

@@ -1,27 +1,6 @@
-import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAuthStore from '../store/authStore'
-import client from '../api/client'
-
-const s = {
-  page: { minHeight: '100vh', background: '#0a0a0a', paddingBottom: '80px' },
-  avatarSection: { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 20px 24px' },
-  avatar: { width: '80px', height: '80px', background: 'linear-gradient(135deg, #6c47ff 0%, #a78bfa 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '36px', marginBottom: '12px' },
-  username: { color: '#fff', fontSize: '20px', fontWeight: '700', marginBottom: '4px' },
-  email: { color: '#888', fontSize: '13px' },
-  infoCard: { margin: '0 20px 20px', background: '#141414', borderRadius: '14px', padding: '16px', border: '1px solid #222' },
-  infoRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #1a1a1a' },
-  infoLabel: { color: '#888', fontSize: '13px' },
-  infoValue: { color: '#fff', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' },
-  copyBtn: { background: '#222', border: '1px solid #333', borderRadius: '6px', color: '#a78bfa', fontSize: '11px', padding: '3px 8px', cursor: 'pointer' },
-  menu: { margin: '0 20px' },
-  menuItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#141414', borderRadius: '12px', padding: '16px', marginBottom: '8px', cursor: 'pointer', border: '1px solid #222' },
-  menuLeft: { display: 'flex', alignItems: 'center', gap: '12px' },
-  menuIcon: { fontSize: '20px' },
-  menuLabel: { color: '#fff', fontSize: '15px' },
-  menuChevron: { color: '#555', fontSize: '18px' },
-  logoutBtn: { margin: '16px 20px', width: 'calc(100% - 40px)', background: 'none', border: '1px solid #f87171', borderRadius: '12px', color: '#f87171', padding: '14px', fontSize: '15px', cursor: 'pointer' },
-}
+import { useMySubs } from '../hooks/useSubscriptions'
 
 const menuItems = [
   { icon: '💼', label: 'My Wallets', path: '/wallets' },
@@ -36,13 +15,8 @@ const menuItems = [
 export default function UserCenter() {
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
-  const [activeSub, setActiveSub] = useState(null)
-
-  useEffect(() => {
-    client.get('/subscriptions/me')
-      .then((r) => setActiveSub(r.data.find((s) => s.status === 'active') || null))
-      .catch(() => {})
-  }, [])
+  const { data: mySubs = [] } = useMySubs()
+  const activeSub = mySubs.find((s) => s.status === 'active') || null
 
   const copy = (text) => navigator.clipboard.writeText(text).catch(() => {})
 
@@ -52,48 +26,57 @@ export default function UserCenter() {
   }
 
   return (
-    <div style={s.page}>
-      <div style={s.avatarSection}>
-        <div style={s.avatar}>👤</div>
-        <div style={s.username}>{user?.username || 'User'}</div>
-        <div style={s.email}>{user?.email}</div>
+    <div className="min-h-screen bg-[#0a0a0a] pb-20">
+      <div className="flex flex-col items-center px-5 pt-10 pb-6">
+        <div className="w-20 h-20 bg-gradient-to-br from-[#6c47ff] to-[#a78bfa] rounded-full flex items-center justify-center text-4xl mb-3">👤</div>
+        <div className="text-white text-xl font-bold mb-1">{user?.username || 'User'}</div>
+        <div className="text-[#888] text-sm">{user?.email}</div>
         {activeSub && (
-          <div style={{ marginTop: '10px', background: 'rgba(108,71,255,0.15)', border: '1px solid #6c47ff', borderRadius: '20px', padding: '4px 14px', color: '#a78bfa', fontSize: '12px', fontWeight: '600' }}>
+          <div className="mt-2.5 bg-[rgba(108,71,255,0.15)] border border-[#6c47ff] rounded-full px-3.5 py-1 text-[#a78bfa] text-xs font-semibold">
             {activeSub.plan.charAt(0).toUpperCase() + activeSub.plan.slice(1)} Plan Active
           </div>
         )}
       </div>
 
-      <div style={s.infoCard}>
-        <div style={s.infoRow}>
-          <div style={s.infoLabel}>UID</div>
-          <div style={s.infoValue}>
+      <div className="mx-5 mb-5 bg-[#141414] rounded-[14px] p-4 border border-[#222]">
+        <div className="flex justify-between items-center py-2.5 border-b border-[#1a1a1a]">
+          <div className="text-[#888] text-sm">UID</div>
+          <div className="text-white text-sm flex items-center gap-2">
             {user?.id}
-            <button style={s.copyBtn} onClick={() => copy(String(user?.id))}>Copy</button>
+            <button className="bg-[#222] border border-[#333] rounded-md text-[#a78bfa] text-[11px] px-2 py-0.5 cursor-pointer" onClick={() => copy(String(user?.id))}>Copy</button>
           </div>
         </div>
-        <div style={{ ...s.infoRow, borderBottom: 'none' }}>
-          <div style={s.infoLabel}>Referral Code</div>
-          <div style={s.infoValue}>
+        <div className="flex justify-between items-center py-2.5">
+          <div className="text-[#888] text-sm">Referral Code</div>
+          <div className="text-white text-sm flex items-center gap-2">
             {user?.referral_code}
-            <button style={s.copyBtn} onClick={() => copy(user?.referral_code)}>Copy</button>
+            <button className="bg-[#222] border border-[#333] rounded-md text-[#a78bfa] text-[11px] px-2 py-0.5 cursor-pointer" onClick={() => copy(user?.referral_code)}>Copy</button>
           </div>
         </div>
       </div>
 
-      <div style={s.menu}>
+      <div className="mx-5">
         {menuItems.map((item) => (
-          <div key={item.label} style={s.menuItem} onClick={() => navigate(item.path)}>
-            <div style={s.menuLeft}>
-              <div style={s.menuIcon}>{item.icon}</div>
-              <div style={s.menuLabel}>{item.label}</div>
+          <div
+            key={item.label}
+            className="flex justify-between items-center bg-[#141414] rounded-xl p-4 mb-2 cursor-pointer border border-[#222]"
+            onClick={() => navigate(item.path)}
+          >
+            <div className="flex items-center gap-3">
+              <div className="text-xl">{item.icon}</div>
+              <div className="text-white text-base">{item.label}</div>
             </div>
-            <div style={s.menuChevron}>›</div>
+            <div className="text-[#555] text-lg">›</div>
           </div>
         ))}
       </div>
 
-      <button style={s.logoutBtn} onClick={handleLogout}>Log Out</button>
+      <button
+        className="mx-5 mt-4 w-[calc(100%-40px)] bg-transparent border border-[#f87171] rounded-xl text-[#f87171] py-3.5 text-base cursor-pointer"
+        onClick={handleLogout}
+      >
+        Log Out
+      </button>
     </div>
   )
 }

@@ -1,80 +1,49 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import client from '../api/client'
+import { usePlans, useMySubs, useSubscribe, useCancelSubscription } from '../hooks/useSubscriptions'
+import { useStrategies } from '../hooks/useTrading'
+import { useWallet } from '../hooks/useWallet'
 
 export default function Subscriptions() {
   const navigate = useNavigate()
-  const [plans, setPlans] = useState([])
-  const [mySubs, setMySubs] = useState([])
-  const [wallet, setWallet] = useState(null)
-  const [availableSymbols, setAvailableSymbols] = useState([])
-  const [buying, setBuying] = useState('')
   const [selectedPlan, setSelectedPlan] = useState(null)
   const [selectedCoins, setSelectedCoins] = useState([])
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
 
-  const load = () => {
-    client.get('/subscriptions/plans').then((r) => setPlans(r.data)).catch(() => {})
-    client.get('/subscriptions/me').then((r) => setMySubs(r.data)).catch(() => {})
-    client.get('/wallet').then((r) => setWallet(r.data)).catch(() => {})
-    client.get('/trading/strategies')
-      .then((r) => {
-        const symbols = [...new Set(r.data.flatMap((s) => s.symbols || []))]
-        setAvailableSymbols(symbols)
-      })
-      .catch(() => {})
-  }
+  const { data: plans = [] } = usePlans()
+  const { data: mySubs = [] } = useMySubs()
+  const { data: wallet } = useWallet()
+  const { data: strategies = [] } = useStrategies()
+  const availableSymbols = [...new Set(strategies.flatMap((s) => s.symbols || []))]
 
-  useEffect(() => { load() }, [])
+  const subscribeMutation = useSubscribe()
+  const cancelMutation = useCancelSubscription()
 
   const activeSub = mySubs.find((s) => s.status === 'active')
-
-  const handleSelectPlan = (plan) => {
-    setSelectedPlan(plan)
-    setSelectedCoins([])
-    setError('')
-  }
 
   const toggleCoin = (symbol) => {
     if (selectedCoins.includes(symbol)) {
       setSelectedCoins(selectedCoins.filter((c) => c !== symbol))
-    } else if (selectedCoins.length < selectedPlan.coins) {
+    } else if (selectedPlan && selectedCoins.length < selectedPlan.coins) {
       setSelectedCoins([...selectedCoins, symbol])
     }
   }
 
-  const handleBuy = async () => {
-    if (!selectedPlan) return
-    if (selectedCoins.length !== selectedPlan.coins) {
-      setError(`Please select exactly ${selectedPlan.coins} coin(s)`)
-      return
-    }
-    setError('')
-    setSuccess('')
-    setBuying(selectedPlan.plan)
-    try {
-      await client.post('/subscriptions', { plan: selectedPlan.plan, coins: selectedCoins })
-      setSuccess(`${selectedPlan.plan.charAt(0).toUpperCase() + selectedPlan.plan.slice(1)} plan activated!`)
-      setSelectedPlan(null)
-      setSelectedCoins([])
-      load()
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to purchase subscription')
-    } finally {
-      setBuying('')
-    }
+  const handleBuy = () => {
+    if (!selectedPlan || selectedCoins.length !== selectedPlan.coins) return
+    subscribeMutation.mutate(
+      { plan: selectedPlan.plan, coins: selectedCoins },
+      {
+        onSuccess: () => {
+          setSelectedPlan(null)
+          setSelectedCoins([])
+        },
+      },
+    )
   }
 
-  const handleCancel = async (subId) => {
+  const handleCancel = (subId) => {
     if (!window.confirm('Cancel your subscription?')) return
-    try {
-      await client.delete(`/subscriptions/${subId}`)
-      setSuccess('Subscription cancelled')
-      load()
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to cancel subscription')
-    }
+    cancelMutation.mutate(subId)
   }
 
   const planColors = { starter: '#34d399', trader: '#a78bfa', pro: '#fbbf24' }
@@ -82,13 +51,11 @@ export default function Subscriptions() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
-      {/* Header */}
       <div className="flex items-center gap-3 px-5 pt-6 pb-4">
         <button className="bg-transparent border-none text-white text-2xl cursor-pointer" onClick={() => navigate(-1)}>←</button>
         <div className="text-white text-lg font-semibold">Subscription Plans</div>
       </div>
 
-      {/* Wallet balance */}
       {wallet && (
         <div className="mx-5 mb-4 bg-[#141414] border border-[#222] rounded-xl px-4 py-3 flex justify-between items-center">
           <div className="text-[#aaa] text-sm">Wallet Balance</div>
@@ -96,22 +63,18 @@ export default function Subscriptions() {
         </div>
       )}
 
-      {/* Active subscription */}
       {activeSub && (
         <div className="mx-5 mb-5 bg-[rgba(52,211,153,0.07)] border border-[#34d399] rounded-xl p-4">
           <div className="flex justify-between items-center">
             <div>
               <div className="text-[#34d399] font-bold text-sm">Active Plan: {activeSub.plan.charAt(0).toUpperCase() + activeSub.plan.slice(1)}</div>
-              <div className="text-[#888] text-xs mt-1">
-                Coins: {activeSub.coins?.join(', ') || '—'}
-              </div>
-              <div className="text-[#888] text-xs mt-0.5">
-                Expires: {activeSub.expires_at ? new Date(activeSub.expires_at).toLocaleDateString() : '—'}
-              </div>
+              <div className="text-[#888] text-xs mt-1">Coins: {activeSub.coins?.join(', ') || '—'}</div>
+              <div className="text-[#888] text-xs mt-0.5">Expires: {activeSub.expires_at ? new Date(activeSub.expires_at).toLocaleDateString() : '—'}</div>
             </div>
             <button
               onClick={() => handleCancel(activeSub.id)}
-              className="text-[#f87171] text-xs bg-transparent border border-[#f87171] rounded-lg px-3 py-1.5 cursor-pointer"
+              disabled={cancelMutation.isPending}
+              className="text-[#f87171] text-xs bg-transparent border border-[#f87171] rounded-lg px-3 py-1.5 cursor-pointer disabled:opacity-50"
             >
               Cancel
             </button>
@@ -119,10 +82,18 @@ export default function Subscriptions() {
         </div>
       )}
 
-      {error && <div className="text-[#f87171] text-xs mx-5 mb-3">{error}</div>}
-      {success && <div className="text-[#34d399] text-xs mx-5 mb-3">{success}</div>}
+      {(subscribeMutation.error || cancelMutation.error) && (
+        <div className="text-[#f87171] text-xs mx-5 mb-3">
+          {(subscribeMutation.error || cancelMutation.error)?.response?.data?.detail || 'An error occurred'}
+        </div>
+      )}
+      {subscribeMutation.isSuccess && (
+        <div className="text-[#34d399] text-xs mx-5 mb-3">Plan activated successfully!</div>
+      )}
+      {cancelMutation.isSuccess && (
+        <div className="text-[#34d399] text-xs mx-5 mb-3">Subscription cancelled.</div>
+      )}
 
-      {/* Coin selection modal */}
       {selectedPlan && (
         <div className="mx-5 mb-5 bg-[#141414] border border-[#6c47ff] rounded-xl p-5">
           <div className="text-white font-semibold text-sm mb-1">
@@ -156,23 +127,22 @@ export default function Subscriptions() {
           )}
           <div className="flex gap-3">
             <button
-              onClick={() => { setSelectedPlan(null); setSelectedCoins([]); setError('') }}
+              onClick={() => { setSelectedPlan(null); setSelectedCoins([]) }}
               className="flex-1 bg-[#1e1e1e] border border-[#333] rounded-xl text-[#aaa] py-2.5 font-semibold text-sm cursor-pointer"
             >
               Cancel
             </button>
             <button
               onClick={handleBuy}
-              disabled={selectedCoins.length !== selectedPlan.coins || !!buying}
+              disabled={selectedCoins.length !== selectedPlan.coins || subscribeMutation.isPending}
               className="flex-1 bg-gradient-to-r from-[#6c47ff] to-[#a78bfa] border-none rounded-xl text-white py-2.5 font-semibold text-sm cursor-pointer disabled:opacity-40"
             >
-              {buying === selectedPlan.plan ? 'Activating…' : `Confirm — $${selectedPlan.price}/mo`}
+              {subscribeMutation.isPending ? 'Activating…' : `Confirm — $${selectedPlan.price}/mo`}
             </button>
           </div>
         </div>
       )}
 
-      {/* Plan cards */}
       <div className="px-5 pb-4">
         <div className="text-[#888] text-xs mb-4">
           {activeSub ? 'Cancel current plan to switch' : 'Choose a plan to start trading automatically'}
@@ -211,7 +181,7 @@ export default function Subscriptions() {
                 <div className="text-center font-semibold text-sm py-2" style={{ color }}>✓ Current Plan</div>
               ) : (
                 <button
-                  onClick={() => !activeSub && handleSelectPlan(plan)}
+                  onClick={() => !activeSub && (setSelectedPlan(plan), setSelectedCoins([]))}
                   disabled={!!activeSub}
                   className="w-full border-none rounded-xl text-white py-3 font-semibold text-sm cursor-pointer disabled:opacity-40"
                   style={{ background: `linear-gradient(135deg, ${color}99, ${color})` }}
@@ -224,7 +194,6 @@ export default function Subscriptions() {
         })}
       </div>
 
-      {/* Subscription history */}
       {mySubs.filter((s) => s.status !== 'active').length > 0 && (
         <>
           <div className="text-white font-semibold text-sm px-5 mb-3">History</div>
@@ -242,4 +211,3 @@ export default function Subscriptions() {
     </div>
   )
 }
-

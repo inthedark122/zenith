@@ -1,165 +1,79 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import client from '../api/client'
-import useAuthStore from '../store/authStore'
-
-const styles = {
-  page: {
-    minHeight: '100vh',
-    background: '#0a0a0a',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '24px',
-  },
-  card: {
-    width: '100%',
-    maxWidth: '400px',
-    background: '#141414',
-    borderRadius: '16px',
-    padding: '40px 32px',
-    border: '1px solid #222',
-  },
-  logo: {
-    width: '56px',
-    height: '56px',
-    background: 'linear-gradient(135deg, #6c47ff 0%, #a78bfa 100%)',
-    borderRadius: '50%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '24px',
-    margin: '0 auto 16px',
-  },
-  title: { textAlign: 'center', fontSize: '24px', fontWeight: '700', color: '#fff', marginBottom: '8px' },
-  subtitle: { textAlign: 'center', color: '#888', fontSize: '14px', marginBottom: '32px' },
-  label: { display: 'block', fontSize: '13px', color: '#aaa', marginBottom: '6px' },
-  input: {
-    width: '100%',
-    background: '#1e1e1e',
-    border: '1px solid #333',
-    borderRadius: '8px',
-    padding: '12px 14px',
-    color: '#fff',
-    fontSize: '15px',
-    outline: 'none',
-    marginBottom: '16px',
-  },
-  inputWrap: { position: 'relative', marginBottom: '0' },
-  eye: {
-    position: 'absolute',
-    right: '12px',
-    top: '50%',
-    transform: 'translateY(-50%)',
-    background: 'none',
-    border: 'none',
-    color: '#888',
-    cursor: 'pointer',
-    fontSize: '16px',
-    padding: '4px',
-  },
-  forgot: { display: 'block', textAlign: 'right', color: '#6c47ff', fontSize: '13px', marginBottom: '20px', textDecoration: 'none' },
-  checkRow: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' },
-  checkLabel: { fontSize: '13px', color: '#888' },
-  btn: {
-    width: '100%',
-    background: 'linear-gradient(135deg, #6c47ff 0%, #a78bfa 100%)',
-    border: 'none',
-    borderRadius: '8px',
-    padding: '14px',
-    color: '#fff',
-    fontSize: '16px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    marginBottom: '20px',
-  },
-  footer: { textAlign: 'center', color: '#888', fontSize: '13px' },
-  link: { color: '#6c47ff', textDecoration: 'none' },
-  error: { color: '#f87171', fontSize: '13px', marginBottom: '12px', textAlign: 'center' },
-}
+import { Link } from 'react-router-dom'
+import { useForm } from 'react-hook-form'
+import { useLogin } from '../hooks/useAuth'
 
 export default function Login() {
-  const navigate = useNavigate()
-  const login = useAuthStore((s) => s.login)
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const { register, handleSubmit, formState: { errors } } = useForm()
   const [showPw, setShowPw] = useState(false)
   const [agreed, setAgreed] = useState(false)
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const loginMutation = useLogin()
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    if (!agreed) { setError('Please agree to the terms'); return }
-    setLoading(true)
-    setError('')
-    try {
-      const form = new URLSearchParams()
-      form.append('username', email)
-      form.append('password', password)
-      const { data } = await client.post('/auth/login', form, {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      })
-      login(data.user, data.access_token)
-      navigate('/home')
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Login failed')
-    } finally {
-      setLoading(false)
-    }
+  const onSubmit = (data) => {
+    if (!agreed) return
+    loginMutation.mutate({ email: data.email, password: data.password })
   }
 
+  const inputClass = 'w-full bg-[#1e1e1e] border border-[#333] rounded-lg px-3.5 py-3 text-white text-sm outline-none mb-4'
+  const labelClass = 'block text-[#aaa] text-xs mb-1.5'
+
   return (
-    <div style={styles.page}>
-      <div style={styles.card}>
-        <div style={styles.logo}>⚡</div>
-        <div style={styles.title}>Welcome Back</div>
-        <div style={styles.subtitle}>Sign in to Zenith Trading Bot</div>
+    <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center p-6">
+      <div className="w-full max-w-[400px] bg-[#141414] rounded-2xl p-10 border border-[#222]">
+        <div className="w-14 h-14 bg-gradient-to-br from-[#6c47ff] to-[#a78bfa] rounded-full flex items-center justify-center text-2xl mx-auto mb-4">⚡</div>
+        <div className="text-center text-2xl font-bold text-white mb-2">Welcome Back</div>
+        <div className="text-center text-[#888] text-sm mb-8">Sign in to Zenith Trading Bot</div>
 
-        {error && <div style={styles.error}>{error}</div>}
+        {loginMutation.error && (
+          <div className="text-[#f87171] text-xs mb-3 text-center">
+            {loginMutation.error.response?.data?.detail || 'Login failed'}
+          </div>
+        )}
 
-        <form onSubmit={handleSubmit}>
-          <label style={styles.label}>Email</label>
+        <form onSubmit={handleSubmit(onSubmit)}>
+          <label className={labelClass}>Email</label>
           <input
-            style={styles.input}
+            className={inputClass}
             type="email"
             placeholder="Enter your email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
+            {...register('email', { required: 'Email is required' })}
           />
+          {errors.email && <div className="text-[#f87171] text-xs -mt-3 mb-3">{errors.email.message}</div>}
 
-          <label style={styles.label}>Password</label>
-          <div style={{ ...styles.inputWrap, marginBottom: '4px' }}>
+          <label className={labelClass}>Password</label>
+          <div className="relative mb-4">
             <input
-              style={{ ...styles.input, marginBottom: '0', paddingRight: '44px' }}
+              className="w-full bg-[#1e1e1e] border border-[#333] rounded-lg px-3.5 py-3 text-white text-sm outline-none pr-11"
               type={showPw ? 'text' : 'password'}
               placeholder="Enter your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
+              {...register('password', { required: 'Password is required' })}
             />
-            <button type="button" style={styles.eye} onClick={() => setShowPw((p) => !p)}>
+            <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-[#888] bg-none border-none cursor-pointer text-base" onClick={() => setShowPw((p) => !p)}>
               {showPw ? '🙈' : '👁️'}
             </button>
           </div>
+          {errors.password && <div className="text-[#f87171] text-xs -mt-3 mb-3">{errors.password.message}</div>}
 
-          <a href="#" style={styles.forgot}>Forgot Password?</a>
+          <a href="#" className="block text-right text-[#6c47ff] text-xs mb-5 no-underline">Forgot Password?</a>
 
-          <div style={styles.checkRow}>
+          <div className="flex items-center gap-2 mb-6">
             <input type="checkbox" id="agree" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
-            <label htmlFor="agree" style={styles.checkLabel}>
-              I agree to the <a href="#" style={styles.link}>Terms of Service</a> and <a href="#" style={styles.link}>Privacy Policy</a>
+            <label htmlFor="agree" className="text-[#888] text-xs">
+              I agree to the <a href="#" className="text-[#6c47ff] no-underline">Terms of Service</a> and <a href="#" className="text-[#6c47ff] no-underline">Privacy Policy</a>
             </label>
           </div>
 
-          <button type="submit" style={styles.btn} disabled={loading}>
-            {loading ? 'Signing in…' : 'Login'}
+          <button
+            type="submit"
+            disabled={loginMutation.isPending || !agreed}
+            className="w-full bg-gradient-to-br from-[#6c47ff] to-[#a78bfa] border-none rounded-lg py-3.5 text-white text-base font-semibold cursor-pointer mb-5 disabled:opacity-50"
+          >
+            {loginMutation.isPending ? 'Signing in…' : 'Login'}
           </button>
         </form>
 
-        <div style={styles.footer}>
-          Don't have an account? <Link to="/register" style={styles.link}>Register</Link>
+        <div className="text-center text-[#888] text-sm">
+          Don't have an account? <Link to="/register" className="text-[#6c47ff] no-underline">Register</Link>
         </div>
       </div>
     </div>

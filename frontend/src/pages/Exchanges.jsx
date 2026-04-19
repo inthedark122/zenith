@@ -1,54 +1,32 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import client from '../api/client'
+import { useForm } from 'react-hook-form'
+import { useExchanges, useSupportedExchanges, useAddExchange, useRemoveExchange } from '../hooks/useExchanges'
 
 export default function Exchanges() {
   const navigate = useNavigate()
-  const [exchanges, setExchanges] = useState([])
-  const [supported, setSupported] = useState([])
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ exchange_id: '', label: '', api_key: '', api_secret: '', passphrase: '' })
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
+  const { register, handleSubmit, reset, formState: { errors } } = useForm()
 
-  const load = () => {
-    client.get('/exchanges').then((r) => setExchanges(r.data)).catch(() => {})
-    client.get('/exchanges/supported').then((r) => setSupported(r.data.exchanges || [])).catch(() => {})
+  const { data: exchanges = [] } = useExchanges()
+  const { data: supportedData } = useSupportedExchanges()
+  const supported = supportedData?.exchanges || []
+
+  const addExchange = useAddExchange()
+  const removeExchange = useRemoveExchange()
+
+  const onSubmit = (data) => {
+    addExchange.mutate(data, {
+      onSuccess: () => {
+        setShowForm(false)
+        reset()
+      },
+    })
   }
 
-  useEffect(() => { load() }, [])
-
-  const handleAdd = async (e) => {
-    e.preventDefault()
-    setError('')
-    setSuccess('')
-    if (!form.exchange_id || !form.api_key || !form.api_secret) {
-      setError('Exchange, API Key and API Secret are required')
-      return
-    }
-    setSaving(true)
-    try {
-      await client.post('/exchanges', form)
-      setSuccess('Exchange connected successfully')
-      setShowForm(false)
-      setForm({ exchange_id: '', label: '', api_key: '', api_secret: '', passphrase: '' })
-      load()
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to connect exchange')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleDelete = async (exchangeId) => {
+  const handleDelete = (exchangeId) => {
     if (!window.confirm(`Remove ${exchangeId}?`)) return
-    try {
-      await client.delete(`/exchanges/${exchangeId}`)
-      load()
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to remove exchange')
-    }
+    removeExchange.mutate(exchangeId)
   }
 
   const inputClass = 'w-full bg-[#1e1e1e] border border-[#333] rounded-lg px-3 py-2.5 text-white text-sm outline-none mb-3'
@@ -56,16 +34,17 @@ export default function Exchanges() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
-      {/* Header */}
       <div className="flex items-center gap-3 px-5 pt-6 pb-4">
         <button className="bg-transparent border-none text-white text-2xl cursor-pointer" onClick={() => navigate(-1)}>←</button>
         <div className="text-white text-lg font-semibold">Exchange Connections</div>
       </div>
 
-      {error && <div className="text-[#f87171] text-xs mx-5 mb-3">{error}</div>}
-      {success && <div className="text-[#34d399] text-xs mx-5 mb-3">{success}</div>}
+      {removeExchange.error && (
+        <div className="text-[#f87171] text-xs mx-5 mb-3">
+          {removeExchange.error.response?.data?.detail || 'Failed to remove exchange'}
+        </div>
+      )}
 
-      {/* Connected exchanges */}
       {exchanges.length === 0 ? (
         <div className="text-center text-[#555] py-8 px-5 text-sm">No exchanges connected yet.</div>
       ) : (
@@ -84,7 +63,8 @@ export default function Exchanges() {
               </div>
               <button
                 onClick={() => handleDelete(exc.exchange_id)}
-                className="text-[#f87171] text-xs bg-[rgba(248,113,113,0.1)] border border-[#f87171] rounded-lg px-3 py-1.5 cursor-pointer"
+                disabled={removeExchange.isPending}
+                className="text-[#f87171] text-xs bg-[rgba(248,113,113,0.1)] border border-[#f87171] rounded-lg px-3 py-1.5 cursor-pointer disabled:opacity-50"
               >
                 Remove
               </button>
@@ -93,7 +73,6 @@ export default function Exchanges() {
         ))
       )}
 
-      {/* Add exchange button */}
       {!showForm && (
         <div className="mx-5 mt-2">
           <button
@@ -105,50 +84,56 @@ export default function Exchanges() {
         </div>
       )}
 
-      {/* Add form */}
       {showForm && (
-        <form onSubmit={handleAdd} className="mx-5 mt-4 bg-[#141414] rounded-xl p-5 border border-[#222]">
+        <form onSubmit={handleSubmit(onSubmit)} className="mx-5 mt-4 bg-[#141414] rounded-xl p-5 border border-[#222]">
           <div className="text-white font-semibold text-sm mb-4">Connect New Exchange</div>
+
+          {addExchange.error && (
+            <div className="text-[#f87171] text-xs mb-3">
+              {addExchange.error.response?.data?.detail || 'Failed to connect exchange'}
+            </div>
+          )}
 
           <label className={labelClass}>Exchange *</label>
           <select
             className={inputClass + ' appearance-none'}
-            value={form.exchange_id}
-            onChange={(e) => setForm({ ...form, exchange_id: e.target.value })}
-            required
+            {...register('exchange_id', { required: 'Select an exchange' })}
           >
             <option value="">Select exchange…</option>
             {supported.map((id) => (
               <option key={id} value={id}>{id.toUpperCase()}</option>
             ))}
           </select>
+          {errors.exchange_id && <div className="text-[#f87171] text-xs -mt-2 mb-2">{errors.exchange_id.message}</div>}
 
           <label className={labelClass}>Label (optional)</label>
-          <input className={inputClass} placeholder="e.g. My OKX Account" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} />
+          <input className={inputClass} placeholder="e.g. My OKX Account" {...register('label')} />
 
           <label className={labelClass}>API Key *</label>
-          <input className={inputClass} placeholder="API key" value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} required />
+          <input className={inputClass} placeholder="API key" {...register('api_key', { required: 'API Key is required' })} />
+          {errors.api_key && <div className="text-[#f87171] text-xs -mt-2 mb-2">{errors.api_key.message}</div>}
 
           <label className={labelClass}>API Secret *</label>
-          <input className={inputClass} type="password" placeholder="API secret" value={form.api_secret} onChange={(e) => setForm({ ...form, api_secret: e.target.value })} required />
+          <input className={inputClass} type="password" placeholder="API secret" {...register('api_secret', { required: 'API Secret is required' })} />
+          {errors.api_secret && <div className="text-[#f87171] text-xs -mt-2 mb-2">{errors.api_secret.message}</div>}
 
           <label className={labelClass}>Passphrase (if required)</label>
-          <input className={inputClass} type="password" placeholder="Passphrase (OKX)" value={form.passphrase} onChange={(e) => setForm({ ...form, passphrase: e.target.value })} />
+          <input className={inputClass} type="password" placeholder="Passphrase (OKX)" {...register('passphrase')} />
 
           <div className="flex gap-3 mt-1">
             <button
               type="button"
-              onClick={() => { setShowForm(false); setError('') }}
+              onClick={() => { setShowForm(false); reset() }}
               className="flex-1 bg-[#1e1e1e] border border-[#333] rounded-xl text-[#aaa] py-3 font-semibold text-sm cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={saving}
+              disabled={addExchange.isPending}
               className="flex-1 bg-gradient-to-r from-[#6c47ff] to-[#a78bfa] border-none rounded-xl text-white py-3 font-semibold text-sm cursor-pointer disabled:opacity-50"
             >
-              {saving ? 'Connecting…' : 'Connect'}
+              {addExchange.isPending ? 'Connecting…' : 'Connect'}
             </button>
           </div>
         </form>

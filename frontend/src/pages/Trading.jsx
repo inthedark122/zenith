@@ -1,64 +1,47 @@
-import { useState, useEffect } from 'react'
-import client from '../api/client'
+import { useState } from 'react'
+import { useForm } from 'react-hook-form'
+import {
+  useStrategies, useWorkers, useTrades,
+  useLaunchWorker, useStopWorker,
+} from '../hooks/useTrading'
+import { useWallet } from '../hooks/useWallet'
+import { tradingApi } from '../api/trading'
 
 // ---- Strategy Card (start worker) ----
-function StrategyCard({ strategy, walletBalance, onLaunched }) {
-  const [margin, setMargin] = useState('')
+function StrategyCard({ strategy, walletBalance }) {
+  const { register, handleSubmit, reset, formState: { errors } } = useForm()
   const [signal, setSignal] = useState(null)
   const [signalLoading, setSignalLoading] = useState(false)
-  const [launching, setLaunching] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
+  const [signalError, setSignalError] = useState('')
+  const launchWorker = useLaunchWorker()
 
   const fetchSignal = async () => {
     setSignalLoading(true)
-    setError('')
+    setSignalError('')
     try {
-      const { data } = await client.get(`/trading/signal/${strategy.id}`)
+      const data = await tradingApi.getSignal(strategy.id)
       setSignal(data)
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to fetch signal')
+      setSignalError(err.response?.data?.detail || 'Failed to fetch signal')
     } finally {
       setSignalLoading(false)
     }
   }
 
-  const handleLaunch = async (e) => {
-    e.preventDefault()
-    setError('')
-    setSuccess('')
-    const marginVal = parseFloat(margin)
-    if (!marginVal || marginVal <= 0) { setError('Enter a valid margin'); return }
-    if (marginVal > walletBalance) {
-      setError(`Insufficient balance (available: $${walletBalance.toFixed(2)})`)
-      return
-    }
-    setLaunching(true)
-    try {
-      await client.post('/trading/launch', {
-        strategy_id: strategy.id,
-        margin: marginVal,
-      })
-      setSuccess('Worker started! It will open trades automatically when signals fire.')
-      setMargin('')
-      setSignal(null)
-      onLaunched()
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to start worker')
-    } finally {
-      setLaunching(false)
-    }
-  }
-
   const maxDailyMargin = strategy.settings?.max_daily_margin_usd ?? 0
   const maxDailyTrades = strategy.settings?.max_daily_trades ?? 2
-  const maxMargin = maxDailyMargin > 0
-    ? Math.min(walletBalance, maxDailyMargin)
-    : walletBalance
+  const maxMargin = maxDailyMargin > 0 ? Math.min(walletBalance, maxDailyMargin) : walletBalance
+
+  const onSubmit = (data) => {
+    const marginVal = parseFloat(data.margin)
+    launchWorker.mutate(
+      { strategy_id: strategy.id, margin: marginVal },
+      { onSuccess: () => { reset(); setSignal(null) } },
+    )
+  }
 
   return (
     <div className="mx-5 mb-4 bg-[#141414] rounded-[14px] p-5 border border-[#222]">
-      {/* Header */}
       <div className="flex justify-between items-center mb-4">
         <div>
           <div className="text-white font-bold text-base">{strategy.name}</div>
@@ -80,7 +63,6 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
         </div>
       </div>
 
-      {/* Symbols */}
       <div className="flex flex-wrap gap-1.5 mb-4">
         {(strategy.symbols || []).map((sym) => (
           <span key={sym} className="bg-[#1a1a2e] border border-[#6c47ff33] text-[#a78bfa] rounded-md px-2 py-0.5 text-xs font-semibold">
@@ -89,7 +71,6 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
         ))}
       </div>
 
-      {/* Strategy rules */}
       <div className="bg-[#1a1a2e] border border-[#6c47ff33] rounded-[10px] p-3.5 mb-4">
         <div className="text-[#a78bfa] text-xs leading-relaxed">
           <strong className="text-[#c4b5fd]">How it works:</strong><br />
@@ -97,13 +78,10 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
           • D1 MACD bullish crossover → opens a Long trade<br />
           • Risk/Reward 1:{strategy.rr_ratio} · Worker auto-closes at TP or SL<br />
           • Max {maxDailyTrades} entries per day per symbol
-          {maxDailyMargin > 0 && (
-            <><br />• Max daily margin: ${maxDailyMargin}</>
-          )}
+          {maxDailyMargin > 0 && (<><br />• Max daily margin: ${maxDailyMargin}</>)}
         </div>
       </div>
 
-      {/* Signal panel */}
       {signal && (
         <div className="bg-[#1e1e1e] rounded-[10px] p-3.5 mb-4">
           <div className="flex justify-between mb-1.5">
@@ -131,22 +109,25 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
         </div>
       )}
 
-      {/* Launch form — margin only */}
-      <form onSubmit={handleLaunch} className="mb-3">
+      <form onSubmit={handleSubmit(onSubmit)} className="mb-3">
         <label className="block text-[#aaa] text-xs mb-1.5">
           Margin per trade (USDT) — available: <span className="text-white font-semibold">${walletBalance.toFixed(2)}</span>
         </label>
         <input
           className="w-full bg-[#1e1e1e] border border-[#333] rounded-lg px-3 py-2.5 text-white text-sm outline-none mb-3"
           type="number"
-          value={margin}
-          onChange={(e) => setMargin(e.target.value)}
           placeholder={`1 – ${maxMargin.toFixed(2)}`}
           min="1"
           max={maxMargin}
           step="any"
-          required
+          {...register('margin', {
+            required: 'Enter a valid margin',
+            min: { value: 1, message: 'Minimum margin is $1' },
+            max: { value: maxMargin, message: `Exceeds available balance ($${maxMargin.toFixed(2)})` },
+          })}
         />
+        {errors.margin && <div className="text-[#f87171] text-xs mb-2">{errors.margin.message}</div>}
+
         <div className="flex gap-2">
           <button
             type="button"
@@ -158,29 +139,31 @@ function StrategyCard({ strategy, walletBalance, onLaunched }) {
           </button>
           <button
             type="submit"
-            disabled={launching}
+            disabled={launchWorker.isPending}
             className="flex-1 bg-gradient-to-r from-[#6c47ff] to-[#a78bfa] border-none rounded-lg text-white px-4 py-2.5 font-semibold text-sm cursor-pointer disabled:opacity-50"
           >
-            {launching ? 'Starting…' : '▶ Start Worker'}
+            {launchWorker.isPending ? 'Starting…' : '▶ Start Worker'}
           </button>
         </div>
       </form>
 
-      {error && <div className="text-[#f87171] text-xs mt-1">{error}</div>}
-      {success && <div className="text-[#34d399] text-xs mt-1">{success}</div>}
+      {signalError && <div className="text-[#f87171] text-xs mt-1">{signalError}</div>}
+      {launchWorker.error && (
+        <div className="text-[#f87171] text-xs mt-1">
+          {launchWorker.error.response?.data?.detail || 'Failed to start worker'}
+        </div>
+      )}
+      {launchWorker.isSuccess && (
+        <div className="text-[#34d399] text-xs mt-1">Worker started! It will open trades automatically when signals fire.</div>
+      )}
     </div>
   )
 }
 
 // ---- Worker Row ----
-function WorkerRow({ worker, onStop }) {
-  const [stopping, setStopping] = useState(false)
+function WorkerRow({ worker }) {
+  const stopWorker = useStopWorker()
   const isRunning = worker.status === 'running'
-
-  const handleStop = async () => {
-    setStopping(true)
-    try { await onStop(worker.id) } finally { setStopping(false) }
-  }
 
   return (
     <div className="mx-5 mb-2.5 bg-[#141414] rounded-xl p-4 border border-[#222]">
@@ -201,11 +184,11 @@ function WorkerRow({ worker, onStop }) {
       </div>
       {isRunning && (
         <button
-          onClick={handleStop}
-          disabled={stopping}
+          onClick={() => stopWorker.mutate(worker.id)}
+          disabled={stopWorker.isPending}
           className="bg-[rgba(248,113,113,0.12)] border border-[#f87171] rounded-lg text-[#f87171] px-4 py-2 font-semibold text-sm cursor-pointer disabled:opacity-50"
         >
-          {stopping ? 'Stopping…' : '⏹ Stop Worker'}
+          {stopWorker.isPending ? 'Stopping…' : '⏹ Stop Worker'}
         </button>
       )}
     </div>
@@ -256,37 +239,18 @@ function TradeRow({ trade }) {
 
 // ---- Main Page ----
 export default function Trading() {
-  const [strategies, setStrategies] = useState([])
-  const [workers, setWorkers] = useState([])
-  const [trades, setTrades] = useState([])
-  const [walletBalance, setWalletBalance] = useState(0)
   const [tab, setTab] = useState('strategies')
-  const [error, setError] = useState('')
+  const { data: strategies = [], isLoading: strategiesLoading } = useStrategies()
+  const { data: workers = [] } = useWorkers()
+  const { data: trades = [] } = useTrades()
+  const { data: wallet } = useWallet()
 
-  const loadData = () => {
-    client.get('/trading/strategies').then((r) => setStrategies(r.data)).catch(() => {})
-    client.get('/trading/workers').then((r) => setWorkers(r.data)).catch(() => {})
-    client.get('/trading/trades').then((r) => setTrades(r.data)).catch(() => {})
-    client.get('/wallet').then((r) => setWalletBalance(parseFloat(r.data.balance) || 0)).catch(() => {})
-  }
-
-  useEffect(() => { loadData() }, [])
-
-  const handleStopWorker = async (workerId) => {
-    try {
-      await client.post(`/trading/stop/${workerId}`)
-      loadData()
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to stop worker')
-    }
-  }
-
+  const walletBalance = parseFloat(wallet?.balance) || 0
   const runningWorkers = workers.filter((w) => w.status === 'running')
   const openTrades = trades.filter((t) => t.status === 'open')
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-20">
-      {/* Header */}
       <div className="px-5 pt-6 pb-4">
         <div className="text-white text-[22px] font-bold">Trading</div>
         <div className="text-[#888] text-sm mt-1">DCA_MACD_DAILY · Workers run automatically</div>
@@ -302,7 +266,6 @@ export default function Trading() {
         </div>
       </div>
 
-      {/* Tab bar */}
       <div className="flex mx-5 mb-2 border-b border-[#222]">
         {[
           { key: 'strategies', label: '📋 Strategies' },
@@ -319,29 +282,26 @@ export default function Trading() {
         ))}
       </div>
 
-      {error && <div className="text-[#f87171] text-xs mx-5 mb-2">{error}</div>}
-
-      {/* Strategies */}
       {tab === 'strategies' && (
-        strategies.length === 0
-          ? <div className="text-center text-[#555] py-6 px-5 text-sm">No strategies available yet.</div>
-          : strategies.map((s) => (
-            <StrategyCard key={s.id} strategy={s} walletBalance={walletBalance} onLaunched={loadData} />
-          ))
+        strategiesLoading
+          ? <div className="text-center text-[#555] py-6 px-5 text-sm">Loading strategies…</div>
+          : strategies.length === 0
+            ? <div className="text-center text-[#555] py-6 px-5 text-sm">No strategies available yet.</div>
+            : strategies.map((s) => (
+              <StrategyCard key={s.id} strategy={s} walletBalance={walletBalance} />
+            ))
       )}
 
-      {/* Workers */}
       {tab === 'workers' && (
         <>
           <div className="text-white text-base font-semibold px-5 py-4">Your Workers</div>
           {workers.length === 0
             ? <div className="text-center text-[#555] py-6 px-5 text-sm">No workers yet — start one from Strategies.</div>
-            : workers.map((w) => <WorkerRow key={w.id} worker={w} onStop={handleStopWorker} />)
+            : workers.map((w) => <WorkerRow key={w.id} worker={w} />)
           }
         </>
       )}
 
-      {/* Trades */}
       {tab === 'trades' && (
         <>
           <div className="text-white text-base font-semibold px-5 py-4">Trade History</div>
