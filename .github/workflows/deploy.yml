@@ -1,0 +1,54 @@
+name: Deploy to Railway
+
+on:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+# Determine target environment from the branch name:
+#   main → production
+#   dev  → development
+# Each GitHub Environment stores its own RAILWAY_TOKEN and service name variables,
+# so the same workflow deploys to the correct Railway project automatically.
+
+jobs:
+  # ─── Backend ───────────────────────────────────────────────────────────────
+  deploy-backend:
+    name: Deploy Backend (${{ github.ref_name == 'main' && 'production' || 'development' }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy backend to Railway
+        working-directory: ./backend
+        run: railway up --service ${{ vars.RAILWAY_BACKEND_SERVICE }} --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+  # ─── Frontend ──────────────────────────────────────────────────────────────
+  deploy-frontend:
+    name: Deploy Frontend (${{ github.ref_name == 'main' && 'production' || 'development' }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+    needs: deploy-backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy frontend to Railway
+        working-directory: ./frontend
+        run: railway up --service ${{ vars.RAILWAY_FRONTEND_SERVICE }} --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
