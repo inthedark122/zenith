@@ -1,281 +1,320 @@
 # 🚀 Railway Deployment Guide
 
-This guide walks you through deploying **Zenith** to [Railway](https://railway.app) for the first time, and configuring GitHub Actions so every push to `main` redeploys the application automatically.
+This guide walks you through deploying **Zenith** to [Railway](https://railway.app) for the first time using GitHub Actions CI/CD — **no local tools required**.
+
+Everything is configured through the Railway dashboard and GitHub repository settings.
 
 ---
 
 ## Table of Contents
 
-1. [Prerequisites](#1-prerequisites)
+1. [Environments overview](#1-environments-overview)
 2. [Architecture on Railway](#2-architecture-on-railway)
-3. [One-time Railway Project Setup](#3-one-time-railway-project-setup)
-4. [Configure Environment Variables](#4-configure-environment-variables)
-5. [Connect GitHub for CI/CD](#5-connect-github-for-cicd)
-6. [Verify the Deployment](#6-verify-the-deployment)
-7. [Subsequent Deployments](#7-subsequent-deployments)
-8. [Environment Variable Reference](#8-environment-variable-reference)
-9. [Troubleshooting](#9-troubleshooting)
+3. [Step 1 — Create Railway projects (dashboard)](#3-step-1--create-railway-projects-dashboard)
+4. [Step 2 — Configure environment variables in Railway](#4-step-2--configure-environment-variables-in-railway)
+5. [Step 3 — Get Railway API tokens](#5-step-3--get-railway-api-tokens)
+6. [Step 4 — Configure GitHub Environments](#6-step-4--configure-github-environments)
+7. [Step 5 — Trigger the first deployment](#7-step-5--trigger-the-first-deployment)
+8. [Step 6 — Verify the deployment](#8-step-6--verify-the-deployment)
+9. [How CI/CD works (day-to-day)](#9-how-cicd-works-day-to-day)
+10. [Environment variable reference](#10-environment-variable-reference)
+11. [Troubleshooting](#11-troubleshooting)
 
 ---
 
-## 1. Prerequisites
+## 1. Environments overview
 
-| Tool | Purpose |
-|------|---------|
-| [Railway account](https://railway.app) | Hosting platform |
-| [Railway CLI](https://docs.railway.app/guides/cli) | Local management (`npm i -g @railway/cli`) |
-| GitHub repository | Source of truth for CI/CD |
-| A BIP-39 mnemonic (12–24 words) | HD wallet seed for deposit address derivation |
+| Git branch | GitHub Environment | Railway project | Purpose |
+|------------|-------------------|-----------------|---------|
+| `dev`      | `development`     | `zenith-dev`    | Test changes before production |
+| `main`     | `production`      | `zenith-prod`   | Live production deployment |
 
-Install and authenticate the Railway CLI:
-
-```bash
-npm install -g @railway/cli
-railway login
-```
+Both environments use the **same workflow file** (`.github/workflows/deploy.yml`). The branch name determines which GitHub Environment — and therefore which Railway project and API token — the workflow uses.
 
 ---
 
 ## 2. Architecture on Railway
 
+Each Railway project (dev and production) contains the same three services:
+
 ```
-Railway Project: zenith
+Railway Project: zenith-prod  (or zenith-dev)
 ├── Service: postgres   ← Managed PostgreSQL (Railway plugin)
 ├── Service: backend    ← Python / FastAPI  (./backend/Dockerfile)
 └── Service: frontend   ← React / nginx     (./frontend/Dockerfile)
 ```
 
-The **backend** service connects to **postgres** using the `DATABASE_URL` variable that Railway injects automatically when services are linked.
+The **backend** connects to **postgres** via `DATABASE_URL`, which Railway injects automatically when the services are linked.
 
-The **frontend** nginx container proxies all `/api/` requests to the backend using the `BACKEND_URL` environment variable you configure below.
+The **frontend** nginx proxies all `/api/` calls to the backend using the `BACKEND_URL` variable you set below.
 
 ---
 
-## 3. One-time Railway Project Setup
+## 3. Step 1 — Create Railway projects (dashboard)
+
+Repeat the steps below **twice**: once for the `development` project and once for the `production` project.
 
 ### 3.1 Create the project
 
-```bash
-railway init
-# When prompted, choose "Empty project" and name it "zenith"
-```
-
-Or create a project from the [Railway dashboard](https://railway.app/new).
+1. Go to [railway.app/new](https://railway.app/new).
+2. Click **Empty Project**.
+3. Name it `zenith-dev` (for development) or `zenith-prod` (for production).
 
 ### 3.2 Add a PostgreSQL database
 
-In the Railway dashboard for your project:
+1. Inside the project, click **+ New** → **Database** → **Add PostgreSQL**.
+2. Railway provisions the database. Note the connection details — `DATABASE_URL` will be available as a variable to link to services.
 
-1. Click **+ New** → **Database** → **Add PostgreSQL**.
-2. Railway provisions a managed Postgres instance and exposes `DATABASE_URL` automatically.
+### 3.3 Add the backend service
 
-### 3.3 Create the backend service
+1. Click **+ New** → **GitHub Repo**.
+2. Select this repository (`inthedark122/zenith`).
+3. Set **Root Directory** to `backend`.
+4. Railway detects `backend/Dockerfile` automatically.
+5. Name the service `backend`.
 
-```bash
-# From the repo root
-cd backend
-railway service create backend
-railway up --service backend --detach
-```
-
-Or in the dashboard: **+ New** → **GitHub Repo** → select this repo → set **Root Directory** to `backend`.
-
-### 3.4 Create the frontend service
-
-```bash
-cd ../frontend
-railway service create frontend
-railway up --service frontend --detach
-```
-
-Or in the dashboard: **+ New** → **GitHub Repo** → select this repo → set **Root Directory** to `frontend`.
-
-### 3.5 Link the backend service to the Postgres database
-
-In the Railway dashboard:
+### 3.4 Link the database to the backend
 
 1. Open the **backend** service → **Variables** tab.
 2. Click **+ Add Reference** → select the **postgres** service → select `DATABASE_URL`.
 
-Railway will now automatically inject `DATABASE_URL` into the backend container whenever the Postgres service is redeployed.
+Railway will inject `DATABASE_URL` into the backend container on every deployment.
+
+### 3.5 Add the frontend service
+
+1. Click **+ New** → **GitHub Repo** (same repository).
+2. Set **Root Directory** to `frontend`.
+3. Railway detects `frontend/Dockerfile` automatically.
+4. Name the service `frontend`.
+
+> **Important:** Disable Railway's automatic deployments on the services you just created — the GitHub Actions workflow will manage all deployments. In each service: **Settings** → **Source** → toggle off **Auto Deploy**.
 
 ---
 
-## 4. Configure Environment Variables
+## 4. Step 2 — Configure environment variables in Railway
 
-### 4.1 Backend service variables
+Set variables directly in the Railway dashboard under each service's **Variables** tab. Repeat for both the `zenith-dev` and `zenith-prod` projects (with appropriate values for each environment).
 
-Set these in the Railway dashboard under **backend → Variables**, or via the CLI:
+### Backend variables
 
-```bash
-railway variables set SECRET_KEY="<random-32+-char-string>" --service backend
-railway variables set ALGORITHM="HS256" --service backend
-railway variables set ACCESS_TOKEN_EXPIRE_MINUTES="30" --service backend
-railway variables set HD_WALLET_SEED="<your 12-word BIP-39 mnemonic>" --service backend
-railway variables set ETH_RPC_URL="https://cloudflare-eth.com" --service backend
-railway variables set USDT_CONTRACT_ADDRESS="0xdAC17F958D2ee523a2206206994597C13D831ec7" --service backend
-railway variables set BLOCKCHAIN_POLL_INTERVAL="30" --service backend
-railway variables set MARKET_POLL_INTERVAL="60" --service backend
-```
+| Variable | Value |
+|----------|-------|
+| `SECRET_KEY` | A long random string (≥ 32 characters) — generate one at [randomkeygen.com](https://randomkeygen.com) |
+| `ALGORITHM` | `HS256` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` |
+| `HD_WALLET_SEED` | Your BIP-39 mnemonic (12–24 words). **Never share or commit this value.** |
+| `ETH_RPC_URL` | `https://cloudflare-eth.com` (or your own node URL) |
+| `USDT_CONTRACT_ADDRESS` | `0xdAC17F958D2ee523a2206206994597C13D831ec7` |
+| `BLOCKCHAIN_POLL_INTERVAL` | `30` |
+| `MARKET_POLL_INTERVAL` | `60` |
 
-> **Generate a secure secret key:**
-> ```bash
-> python -c "import secrets; print(secrets.token_hex(32))"
-> ```
+> `DATABASE_URL` and `PORT` are injected automatically by Railway — do not set them manually.
 
-> **Generate a BIP-39 mnemonic:**
-> ```bash
-> python -c "from eth_account.hdaccount import generate_mnemonic; print(generate_mnemonic(12, lang='english'))"
-> ```
+### Frontend variables
 
-### 4.2 Frontend service variables
+| Variable | Value |
+|----------|-------|
+| `BACKEND_URL` | The public URL of the **backend** service in the same Railway project, e.g. `https://backend-production-xxxx.up.railway.app` (no trailing slash). Find it in the backend service → **Settings** → **Domains**. |
 
-The frontend nginx needs to know the backend's public URL so it can proxy `/api/` requests.
-
-1. In the Railway dashboard, open the **backend** service → **Settings** → copy the **Public URL** (e.g., `https://backend-production-xxxx.up.railway.app`).
-2. Open the **frontend** service → **Variables**:
-
-```bash
-railway variables set BACKEND_URL="https://backend-production-xxxx.up.railway.app" --service frontend
-# PORT is injected automatically by Railway — no need to set it manually
-```
+> `PORT` is injected automatically by Railway — do not set it manually.
 
 ---
 
-## 5. Connect GitHub for CI/CD
+## 5. Step 3 — Get Railway API tokens
 
-### 5.1 Get a Railway API token
+The GitHub Actions workflow authenticates to Railway using a project-scoped API token.
 
-1. In the Railway dashboard → **Account Settings** → **Tokens**.
-2. Click **+ New Token**, name it `github-actions`, copy the value.
+1. In the Railway dashboard, open the **`zenith-dev`** project.
+2. Click **Settings** (gear icon) → **Tokens**.
+3. Click **+ Create Token**, name it `github-actions-dev`, copy the value.
+4. Repeat for the **`zenith-prod`** project — name the token `github-actions-prod`.
 
-### 5.2 Get service names
+Keep both tokens ready for the next step.
 
-```bash
-railway service list
-# Note the exact names of your "backend" and "frontend" services
-```
+---
 
-### 5.3 Add secrets and variables to GitHub
+## 6. Step 4 — Configure GitHub Environments
 
-In your GitHub repository → **Settings** → **Secrets and variables** → **Actions**:
+GitHub Environments let you store separate secrets and variables for each deployment target.
+
+### 6.1 Create the `development` environment
+
+1. In your GitHub repository, go to **Settings** → **Environments**.
+2. Click **New environment**, name it `development`.
+3. Add the following **secret** and **variables**:
 
 | Type | Name | Value |
 |------|------|-------|
-| **Secret** | `RAILWAY_TOKEN` | Your Railway API token from step 5.1 |
-| **Variable** | `RAILWAY_BACKEND_SERVICE` | Railway service name, e.g. `backend` |
-| **Variable** | `RAILWAY_FRONTEND_SERVICE` | Railway service name, e.g. `frontend` |
+| Secret | `RAILWAY_TOKEN` | The `github-actions-dev` token from step 5 |
+| Variable | `RAILWAY_BACKEND_SERVICE` | `backend` (the service name inside `zenith-dev`) |
+| Variable | `RAILWAY_FRONTEND_SERVICE` | `frontend` (the service name inside `zenith-dev`) |
 
-> **Secrets** are encrypted and hidden in logs. **Variables** are visible in logs — using them for non-sensitive service names is intentional.
+### 6.2 Create the `production` environment
 
-### 5.4 How the workflow works
+1. Click **New environment**, name it `production`.
+2. Optionally enable **Required reviewers** to enforce manual approval before production deployments.
+3. Add the following **secret** and **variables**:
 
-The workflow file lives at `.github/workflows/deploy.yml` and triggers on every push to `main`:
+| Type | Name | Value |
+|------|------|-------|
+| Secret | `RAILWAY_TOKEN` | The `github-actions-prod` token from step 5 |
+| Variable | `RAILWAY_BACKEND_SERVICE` | `backend` (the service name inside `zenith-prod`) |
+| Variable | `RAILWAY_FRONTEND_SERVICE` | `frontend` (the service name inside `zenith-prod`) |
 
-1. **deploy-backend** — runs `railway up --service backend --detach` from the `./backend` directory, uploading the latest code and rebuilding the Docker image.
-2. **deploy-frontend** — runs `railway up --service frontend --detach` from the `./frontend` directory after the backend job succeeds.
+> **Secrets** are encrypted and never visible in logs. **Variables** appear in logs — using them for non-sensitive service names is intentional.
 
-To trigger it manually (e.g., without a code push):
+---
+
+## 7. Step 5 — Trigger the first deployment
+
+### Deploy to development
+
+Push any commit to the `dev` branch (or create the branch if it does not exist):
 
 ```
-GitHub → Actions → "Deploy to Railway" → Run workflow
+GitHub → your branch → create PR targeting dev → merge
+```
+
+Or trigger manually:
+
+```
+GitHub → Actions → "Deploy to Railway" → Run workflow → select branch: dev
+```
+
+### Deploy to production
+
+Push (or merge a PR) to `main`:
+
+```
+GitHub → Actions → "Deploy to Railway" → Run workflow → select branch: main
+```
+
+The workflow automatically selects the correct Railway project based on the branch:
+
+| Branch | GitHub Environment used | Railway project |
+|--------|------------------------|-----------------|
+| `dev`  | `development`          | `zenith-dev`    |
+| `main` | `production`           | `zenith-prod`   |
+
+---
+
+## 8. Step 6 — Verify the deployment
+
+### Monitor the CI/CD run
+
+1. Go to **GitHub → Actions → Deploy to Railway**.
+2. Watch the two jobs: `Deploy Backend` and `Deploy Frontend`.
+3. Both jobs display the environment name in parentheses, e.g. `Deploy Backend (production)`.
+
+### Check Railway
+
+1. Open the Railway project → the **backend** service → **Deployments** tab.
+2. The latest deployment should show a green **Active** status.
+
+### Health check
+
+Once deployed, the backend exposes a health endpoint. Open your browser or use the Railway **shell** feature:
+
+```
+GET https://<your-backend-url>/health
+→ {"status":"ok","service":"zenith-backend"}
+```
+
+The public URL is visible in the backend service → **Settings** → **Domains**.
+
+---
+
+## 9. How CI/CD works (day-to-day)
+
+```
+Developer workflow
+──────────────────
+  feature branch
+       │
+       ▼
+  Pull Request → dev
+       │ (merge)
+       ▼
+  dev branch  ──► GitHub Actions ──► Deploy to zenith-dev  (development)
+       │
+  Pull Request → main
+       │ (merge, optional: requires reviewer approval)
+       ▼
+  main branch ──► GitHub Actions ──► Deploy to zenith-prod (production)
+```
+
+1. Develop in a feature branch.
+2. Open a PR to `dev` → merge → GitHub Actions deploys to `zenith-dev` automatically.
+3. Test on the development URL.
+4. Open a PR from `dev` to `main` → merge → GitHub Actions deploys to `zenith-prod` automatically.
+
+**Manual redeploy** (without a code change):
+
+```
+GitHub → Actions → "Deploy to Railway" → Run workflow → choose branch
 ```
 
 ---
 
-## 6. Verify the Deployment
-
-### 6.1 Check service status
-
-```bash
-railway status --service backend
-railway status --service frontend
-```
-
-Or watch the build logs in the Railway dashboard → service → **Deployments**.
-
-### 6.2 Health check
-
-The backend exposes a `/health` endpoint:
-
-```bash
-curl https://<your-backend-url>/health
-# Expected: {"status":"ok","service":"zenith-backend"}
-```
-
-### 6.3 Open the app
-
-```bash
-railway open --service frontend
-```
-
----
-
-## 7. Subsequent Deployments
-
-Every push to the `main` branch automatically triggers the GitHub Actions workflow, which redeploys both services.
-
-If you only changed the backend, the frontend deployment is still triggered (idempotent — Railway skips if the image is unchanged).
-
-To redeploy manually from the CLI:
-
-```bash
-cd backend && railway up --service backend --detach
-cd ../frontend && railway up --service frontend --detach
-```
-
----
-
-## 8. Environment Variable Reference
+## 10. Environment variable reference
 
 ### Backend
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `DATABASE_URL` | ✅ | — | PostgreSQL connection string (auto-injected by Railway when linked) |
-| `SECRET_KEY` | ✅ | — | JWT signing secret — use a long random string |
+| `DATABASE_URL` | ✅ | *(auto-injected)* | PostgreSQL connection string — linked from the Railway postgres service |
+| `SECRET_KEY` | ✅ | — | JWT signing secret |
 | `ALGORITHM` | | `HS256` | JWT algorithm |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | | `30` | JWT TTL in minutes |
-| `HD_WALLET_SEED` | ✅ | — | BIP-39 mnemonic for HD wallet deposit address derivation |
+| `HD_WALLET_SEED` | ✅ | — | BIP-39 mnemonic for HD wallet deposit-address derivation |
 | `ETH_RPC_URL` | | `https://cloudflare-eth.com` | Ethereum JSON-RPC endpoint |
-| `USDT_CONTRACT_ADDRESS` | | `0xdAC17F958D2ee523a2206206994597C13D831ec7` | USDT ERC-20 contract (mainnet) |
+| `USDT_CONTRACT_ADDRESS` | | `0xdAC17F958D2ee523a2206206994597C13D831ec7` | USDT ERC-20 contract address |
 | `BLOCKCHAIN_POLL_INTERVAL` | | `30` | Seconds between blockchain polls |
 | `MARKET_POLL_INTERVAL` | | `60` | Seconds between market data polls |
-| `PORT` | | `8000` | HTTP port (auto-injected by Railway) |
+| `PORT` | | *(auto-injected)* | HTTP port — Railway injects this automatically |
 
 ### Frontend
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `BACKEND_URL` | ✅ | — | Full URL of the backend service, e.g. `https://backend-xxxx.up.railway.app` |
-| `PORT` | | `80` | HTTP port (auto-injected by Railway) |
+| `BACKEND_URL` | ✅ | — | Public URL of the backend service (no trailing slash) |
+| `PORT` | | *(auto-injected)* | HTTP port — Railway injects this automatically |
+
+### GitHub Environments (per environment)
+
+| Type | Name | Description |
+|------|------|-------------|
+| Secret | `RAILWAY_TOKEN` | Railway project-scoped API token |
+| Variable | `RAILWAY_BACKEND_SERVICE` | Name of the backend service in the Railway project |
+| Variable | `RAILWAY_FRONTEND_SERVICE` | Name of the frontend service in the Railway project |
 
 ---
 
-## 9. Troubleshooting
+## 11. Troubleshooting
+
+### Deployment job fails with "service not found"
+
+- Check that `RAILWAY_BACKEND_SERVICE` / `RAILWAY_FRONTEND_SERVICE` in the GitHub Environment match the **exact** service names shown in the Railway dashboard.
+- Verify that `RAILWAY_TOKEN` in the GitHub Environment belongs to the correct Railway **project** (dev token for `development` environment, prod token for `production` environment).
 
 ### Frontend returns 502 on `/api/` routes
 
-- Check that `BACKEND_URL` is set correctly on the frontend service (no trailing slash).
-- Check that the backend service is healthy: `railway status --service backend`.
+- Confirm `BACKEND_URL` in the frontend service's Railway variables is the correct public URL of the backend service, with no trailing slash.
+- Check that the backend service is in **Active** status in the Railway dashboard.
 
-### Backend fails to start with a database error
+### Backend fails to start: database connection error
 
-- Verify that the PostgreSQL service is running and that `DATABASE_URL` is linked to the backend service.
-- Railway injects `DATABASE_URL` automatically only after you add the reference in the Variables tab.
-
-### `railway up` fails with "project not found"
-
-- Ensure you are authenticated: `railway login`.
-- If running locally, link the project first: `railway link`.
-- In GitHub Actions, confirm `RAILWAY_TOKEN` secret and `RAILWAY_BACKEND_SERVICE` / `RAILWAY_FRONTEND_SERVICE` variables are set correctly.
+- Open the backend service → **Variables** tab and confirm `DATABASE_URL` is listed (it should be referenced from the postgres service, not typed manually).
+- If missing, click **+ Add Reference** → select the postgres service → select `DATABASE_URL`.
 
 ### HD wallet seed not configured
 
-Generate a new mnemonic and set it as the `HD_WALLET_SEED` variable:
+- Set `HD_WALLET_SEED` in the Railway dashboard under the backend service's Variables tab.
+- You can generate a new mnemonic at [iancoleman.io/bip39](https://iancoleman.io/bip39) — choose 12 or 24 words and copy the **BIP39 Mnemonic** field.
+- ⚠️ **Never commit the mnemonic to version control.**
 
-```bash
-python -c "from eth_account.hdaccount import generate_mnemonic; print(generate_mnemonic(12, lang='english'))"
-```
+### Workflow picks the wrong environment
 
-⚠️ **Never commit the mnemonic to version control.** Store it only in Railway's encrypted variable storage.
+- The workflow uses `github.ref_name == 'main'` to choose `production`; any other branch (including `dev`) uses `development`.
+- Automatic deployment on push only fires for `main` and `dev` (the `on.push.branches` filter).
+- If you trigger the workflow manually via `workflow_dispatch` on a feature branch, it will deploy to the `development` environment/project. Avoid doing this unless intentional.

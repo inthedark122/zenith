@@ -2,16 +2,23 @@ name: Deploy to Railway
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
+
+# Determine target environment from the branch name:
+#   main → production
+#   dev  → development
+# Each GitHub Environment stores its own RAILWAY_TOKEN and service name variables,
+# so the same workflow deploys to the correct Railway project automatically.
 
 jobs:
   # ─── Backend ───────────────────────────────────────────────────────────────
   deploy-backend:
-    name: Deploy Backend
+    name: Deploy Backend (${{ github.ref_name == 'main' && 'production' || 'development' }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -27,10 +34,11 @@ jobs:
 
   # ─── Frontend ──────────────────────────────────────────────────────────────
   deploy-frontend:
-    name: Deploy Frontend
+    name: Deploy Frontend (${{ github.ref_name == 'main' && 'production' || 'development' }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
     needs: deploy-backend
     steps:
       - name: Checkout code
