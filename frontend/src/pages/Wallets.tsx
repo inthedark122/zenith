@@ -1,22 +1,14 @@
-import { ArrowDownToLine, ArrowLeft, ArrowUpFromLine, Copy, RefreshCw } from 'lucide-react'
-import { useState } from 'react'
+import { ArrowLeft, ArrowUpFromLine, RefreshCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
-import { useDepositAddress, useTransactions, useWallet } from '../hooks/useWallet'
+import { useTransactions, useWallet } from '../hooks/useWallet'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 
 export default function Wallets() {
   const navigate = useNavigate()
-  const [showDeposit, setShowDeposit] = useState(false)
   const { data: wallet } = useWallet()
   const { data: txs = [] } = useTransactions()
-  const { data: depositData } = useDepositAddress()
-  const depositAddress = depositData?.address ?? ''
-
-  const copyAddress = () => {
-    navigator.clipboard.writeText(depositAddress).catch(() => {})
-  }
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -36,14 +28,6 @@ export default function Wallets() {
       </div>
 
       <div className="flex gap-3 mx-5 mb-5">
-        <Button
-          variant="outline"
-          className="flex-1 flex-col h-auto py-4 gap-1.5 text-xs"
-          onClick={() => setShowDeposit((v) => !v)}
-        >
-          <ArrowDownToLine size={22} />
-          Deposit
-        </Button>
         <Button variant="outline" className="flex-1 flex-col h-auto py-4 gap-1.5 text-xs">
           <ArrowUpFromLine size={22} />
           Withdraw
@@ -54,16 +38,13 @@ export default function Wallets() {
         </Button>
       </div>
 
-      {showDeposit && (
-        <Card className="mx-5 mb-4 p-4 border-[#6c47ff]">
-          <p className="text-muted-foreground text-xs mb-2">USDT Deposit Address (ERC-20)</p>
-          <p className="text-foreground text-xs break-all mb-3">{depositAddress || 'Loading…'}</p>
-          <Button size="sm" onClick={copyAddress} className="gap-1.5">
-            <Copy size={14} />
-            Copy Address
-          </Button>
-        </Card>
-      )}
+      <Card className="mx-5 mb-4 p-4 border-[#6c47ff]">
+        <p className="text-foreground text-sm font-semibold mb-1">Crypto deposits are unavailable</p>
+        <p className="text-muted-foreground text-xs">
+          EVM/ERC-20 wallet payments are disabled while we migrate to a third-party payment
+          provider.
+        </p>
+      </Card>
 
       <h2 className="text-foreground font-semibold text-base px-5 mb-3">Recent Transactions</h2>
       {txs.length === 0 ? (

@@ -18,19 +18,34 @@ from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.wallet import Transaction, Wallet
 from app.services.deposit_address import derive_deposit_address
+
+
+_EVM_PAYMENTS_DISABLED_DETAIL = (
+    "Crypto wallet deposits are temporarily disabled while we migrate to a third-party payment service."
+)
+
+
+def _ensure_evm_payments_enabled() -> None:
+    if not settings.EVM_PAYMENTS_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_EVM_PAYMENTS_DISABLED_DETAIL,
+        )
 
 
 def get_or_create_wallet(user_id: int, db: Session) -> Wallet:
     """Return the user's USDT wallet, creating it (with a unique deposit address) if needed."""
     wallet = db.query(Wallet).filter(Wallet.user_id == user_id).first()
     if wallet is None:
-        # Derive a unique on-chain deposit address for this user
-        try:
-            addr = derive_deposit_address(user_id)
-        except RuntimeError:
-            addr = None  # HD_WALLET_SEED not configured yet — address will be set later
+        addr = None
+        if settings.EVM_PAYMENTS_ENABLED:
+            try:
+                addr = derive_deposit_address(user_id)
+            except RuntimeError:
+                addr = None  # HD_WALLET_SEED not configured yet — address will be set later
 
         wallet = Wallet(
             user_id=user_id,
@@ -51,6 +66,7 @@ def get_user_deposit_address(user_id: int, db: Session) -> str:
     If the wallet already has an address assigned it is returned directly.
     Otherwise a fresh address is derived and persisted.
     """
+    _ensure_evm_payments_enabled()
     wallet = get_or_create_wallet(user_id, db)
     if not wallet.deposit_address:
         wallet.deposit_address = derive_deposit_address(user_id)
@@ -71,6 +87,7 @@ def submit_pending_deposit(
     The balance is NOT credited here.  The blockchain listener worker will
     call `confirm_deposit` once it verifies the transaction on-chain.
     """
+    _ensure_evm_payments_enabled()
     wallet = get_or_create_wallet(user_id, db)
 
     # Prevent duplicate tx_hash submissions
@@ -203,4 +220,3 @@ def debit_wallet(user_id: int, amount: Decimal, db: Session) -> Transaction:
     db.commit()
     db.refresh(tx)
     return tx
-

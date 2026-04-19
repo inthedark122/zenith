@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "changeme-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    EVM_PAYMENTS_ENABLED: bool = False
 
     # HD wallet seed (hex-encoded 64-byte entropy or BIP-39 mnemonic).
     # Used to derive a unique USDT deposit address per user so that the
@@ -29,4 +30,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

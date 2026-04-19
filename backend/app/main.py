@@ -48,11 +48,13 @@ async def startup_event():
     Base.metadata.create_all(bind=engine)
 
     asyncio.create_task(market_listener_loop())
-    asyncio.create_task(blockchain_listener_loop())
-    log.info("Background workers started: market_listener, blockchain_listener")
+    if settings.EVM_PAYMENTS_ENABLED:
+        asyncio.create_task(blockchain_listener_loop())
+        log.info("Background workers started: market_listener, blockchain_listener")
+    else:
+        log.info("Background workers started: market_listener")
 
 
 @app.get("/health")
 def health_check():
     return {"status": "ok", "service": "zenith-backend"}
-

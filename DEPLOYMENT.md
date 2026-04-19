@@ -101,10 +101,7 @@ Set variables directly in the Railway dashboard under each service's **Variables
 | `SECRET_KEY` | A long random string (≥ 32 characters) — generate one at [randomkeygen.com](https://randomkeygen.com) |
 | `ALGORITHM` | `HS256` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` |
-| `HD_WALLET_SEED` | Your BIP-39 mnemonic (12–24 words). **Never share or commit this value.** |
-| `ETH_RPC_URL` | `https://cloudflare-eth.com` (or your own node URL) |
-| `USDT_CONTRACT_ADDRESS` | `0xdAC17F958D2ee523a2206206994597C13D831ec7` |
-| `BLOCKCHAIN_POLL_INTERVAL` | `30` |
+| `EVM_PAYMENTS_ENABLED` | `false` |
 | `MARKET_POLL_INTERVAL` | `60` |
 
 > `DATABASE_URL` and `PORT` are injected automatically by Railway — do not set them manually.
@@ -230,10 +227,7 @@ Railway → Service → Deployments → Redeploy
 | `SECRET_KEY` | ✅ | — | JWT signing secret |
 | `ALGORITHM` | | `HS256` | JWT algorithm |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | | `30` | JWT TTL in minutes |
-| `HD_WALLET_SEED` | ✅ | — | BIP-39 mnemonic for HD wallet deposit-address derivation |
-| `ETH_RPC_URL` | | `https://cloudflare-eth.com` | Ethereum JSON-RPC endpoint |
-| `USDT_CONTRACT_ADDRESS` | | `0xdAC17F958D2ee523a2206206994597C13D831ec7` | USDT ERC-20 contract address |
-| `BLOCKCHAIN_POLL_INTERVAL` | | `30` | Seconds between blockchain polls |
+| `EVM_PAYMENTS_ENABLED` | | `false` | Enables the legacy ERC-20 deposit flow when set to `true` |
 | `MARKET_POLL_INTERVAL` | | `60` | Seconds between market data polls |
 | `PORT` | | *(unused by frontend)* | Frontend nginx listens on port `80` |
 
@@ -262,11 +256,10 @@ Railway → Service → Deployments → Redeploy
 - Open the **BackEnd** service → **Variables** tab and confirm `DATABASE_URL` is listed (it should be referenced from the **Postgres** service, not typed manually).
 - If missing, click **+ Add Reference** → select the **Postgres** service → select `DATABASE_URL`.
 
-### HD wallet seed not configured
+### Crypto deposits are disabled
 
-- Set `HD_WALLET_SEED` in the Railway dashboard under the backend service's Variables tab.
-- You can generate a new mnemonic at [iancoleman.io/bip39](https://iancoleman.io/bip39) — choose 12 or 24 words and copy the **BIP39 Mnemonic** field.
-- ⚠️ **Never commit the mnemonic to version control.**
+- `EVM_PAYMENTS_ENABLED=false` disables the legacy ERC-20 deposit flow and stops the blockchain listener.
+- Wallet deposit address and on-chain transaction submission endpoints return a temporary unavailable response while the third-party payment provider is being integrated.
 
 ### Wrong project or branch deploys
 
