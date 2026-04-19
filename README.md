@@ -8,7 +8,7 @@ Zenith is a fully automated crypto trading platform with a DCA (Dollar-Cost Aver
 
 ```bash
 # 1. Clone and enter the repo
-git clone <repo-url> && cd zenith
+git clone https://github.com/livectar/zenith && cd zenith
 
 # 2. Copy env template
 cp backend/.env.example backend/.env
