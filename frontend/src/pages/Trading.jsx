@@ -40,6 +40,13 @@ function StrategyCard({ strategy, walletBalance }) {
   const maxDailyTrades = strategy.settings?.max_daily_trades ?? 2
   const maxMargin = maxDailyMargin > 0 ? Math.min(walletBalance, maxDailyMargin) : walletBalance
 
+  const signalMetrics = signal
+    ? [
+        { label: 'MACD', value: signal.macd.toFixed(4) },
+        { label: 'Signal line', value: signal.signal.toFixed(4) },
+      ]
+    : []
+
   const onSubmit = (data) => {
     const marginVal = parseFloat(data.margin)
     launchWorker.mutate(
@@ -90,10 +97,7 @@ function StrategyCard({ strategy, walletBalance }) {
 
       {signal && (
         <Card className="p-3.5 mb-4 bg-input border-border">
-          {[
-            { label: 'MACD', value: signal.macd.toFixed(4) },
-            { label: 'Signal line', value: signal.signal.toFixed(4) },
-          ].map(({ label, value }) => (
+          {signalMetrics.map(({ label, value }) => (
             <div key={label} className="flex justify-between mb-1.5">
               <span className="text-muted-foreground text-xs">{label}</span>
               <span className="text-foreground text-xs font-semibold">{value}</span>
@@ -176,6 +180,13 @@ function WorkerRow({ worker }) {
   const stopWorker = useStopWorker()
   const isRunning = worker.status === 'running'
 
+  const workerDetails = [
+    { label: 'Exchange', value: worker.exchange_id.toUpperCase() },
+    { label: 'Margin/trade', value: `$${parseFloat(worker.margin).toFixed(2)}` },
+    { label: 'Started', value: worker.started_at ? new Date(worker.started_at).toLocaleDateString() : '—' },
+    ...(worker.stopped_at ? [{ label: 'Stopped', value: new Date(worker.stopped_at).toLocaleDateString() }] : []),
+  ]
+
   return (
     <Card className="mx-5 mb-2.5 p-4">
       <div className="flex justify-between items-center mb-2">
@@ -188,12 +199,7 @@ function WorkerRow({ worker }) {
         </Badge>
       </div>
       <div className="flex gap-4 mb-3 flex-wrap text-xs">
-        {[
-          { label: 'Exchange', value: worker.exchange_id.toUpperCase() },
-          { label: 'Margin/trade', value: `$${parseFloat(worker.margin).toFixed(2)}` },
-          { label: 'Started', value: worker.started_at ? new Date(worker.started_at).toLocaleDateString() : '—' },
-          ...(worker.stopped_at ? [{ label: 'Stopped', value: new Date(worker.stopped_at).toLocaleDateString() }] : []),
-        ].map(({ label, value }) => (
+        {workerDetails.map(({ label, value }) => (
           <div key={label}>
             <div className="text-muted-foreground">{label}</div>
             <div className="text-foreground font-semibold">{value}</div>
