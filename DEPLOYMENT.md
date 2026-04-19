@@ -79,7 +79,7 @@ Repeat the steps below **twice**: once for the `development` project and once fo
 
 Railway will inject `DATABASE_URL` into the backend container on every deployment.
 
-The backend container runs `alembic upgrade head` before starting Uvicorn, so schema changes are applied during deployment instead of being created implicitly in app startup.
+The backend container bootstraps Alembic before starting Uvicorn. On a fresh database it runs migrations from scratch; on an older database that already has the full initial schema but no `alembic_version` table, it stamps `0001_initial` first and then continues with normal migrations.
 
 ### 3.5 Add the frontend service
 
@@ -260,9 +260,10 @@ Railway → Service → Deployments → Redeploy
 
 ### Backend fails during migration
 
-- The backend deploy runs `alembic upgrade head` before starting the API.
+- The backend deploy bootstraps Alembic before starting the API.
 - Open the **BackEnd** service logs and look for Alembic errors before Uvicorn startup.
 - If the database already exists but the schema is out of sync, fix the migration state first instead of relying on app startup to create tables.
+- If logs mention a partial pre-Alembic schema, reconcile the database manually before redeploying.
 
 ### Crypto deposits are disabled
 
