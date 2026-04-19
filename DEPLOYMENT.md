@@ -112,7 +112,7 @@ Set variables directly in the Railway dashboard under each service's **Variables
 
 | Variable | Value |
 |----------|-------|
-| `BACKEND_URL` | Prefer the Railway private backend URL, e.g. `http://backend.railway.internal:8080`. If you use a public URL instead, nginx-to-backend proxying may fail. |
+| `BACKEND_URL` | The public backend URL, e.g. `https://backend-production-xxxx.up.railway.app` (no trailing slash). The frontend nginx config is set up to proxy HTTPS correctly. |
 
 > The frontend container listens on port `80`. Do not append a port to the public URL.
 
@@ -237,7 +237,7 @@ Railway → Service → Deployments → Redeploy
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `BACKEND_URL` | ✅ | — | Backend base URL used by frontend nginx; prefer `http://backend.railway.internal:8080` on Railway |
+| `BACKEND_URL` | ✅ | — | Backend base URL used by frontend nginx; use the backend public HTTPS URL with no trailing slash |
 | `PORT` | | *(auto-injected)* | HTTP port — Railway injects this automatically |
 
 ## 10. Troubleshooting
@@ -250,7 +250,7 @@ Railway → Service → Deployments → Redeploy
 
 ### Frontend returns 502 on `/api/` routes
 
-- Confirm `BACKEND_URL` in the **FrontEnd** service's Railway variables points to the backend service. On Railway, prefer `http://backend.railway.internal:8080`.
+- Confirm `BACKEND_URL` in the **FrontEnd** service's Railway variables points to the backend public HTTPS URL, with no trailing slash.
 - Check that the backend service is in **Active** status in the Railway dashboard.
 
 ### Backend fails to start: database connection error
