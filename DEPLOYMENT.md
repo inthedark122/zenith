@@ -1,6 +1,6 @@
 # 🚀 Railway Deployment Guide
 
-This guide walks you through deploying **Zenith** to [Railway](https://railway.app) for the first time using GitHub Actions CI/CD — **no local tools required**.
+This guide walks you through deploying **Zenith** to [Railway](https://railway.app) using **Railway Auto Deploy** — **no local tools required**.
 
 Everything is configured through the Railway dashboard and GitHub repository settings.
 
@@ -12,24 +12,23 @@ Everything is configured through the Railway dashboard and GitHub repository set
 2. [Architecture on Railway](#2-architecture-on-railway)
 3. [Step 1 — Create Railway projects (dashboard)](#3-step-1--create-railway-projects-dashboard)
 4. [Step 2 — Configure environment variables in Railway](#4-step-2--configure-environment-variables-in-railway)
-5. [Step 3 — Get Railway API tokens](#5-step-3--get-railway-api-tokens)
-6. [Step 4 — Configure GitHub Environments](#6-step-4--configure-github-environments)
-7. [Step 5 — Trigger the first deployment](#7-step-5--trigger-the-first-deployment)
-8. [Step 6 — Verify the deployment](#8-step-6--verify-the-deployment)
-9. [How CI/CD works (day-to-day)](#9-how-cicd-works-day-to-day)
-10. [Environment variable reference](#10-environment-variable-reference)
-11. [Troubleshooting](#11-troubleshooting)
+5. [Step 3 — Enable Railway Auto Deploy](#5-step-3--enable-railway-auto-deploy)
+6. [Step 4 — Trigger the first deployment](#6-step-4--trigger-the-first-deployment)
+7. [Step 5 — Verify the deployment](#7-step-5--verify-the-deployment)
+8. [How Auto Deploy works (day-to-day)](#8-how-auto-deploy-works-day-to-day)
+9. [Environment variable reference](#9-environment-variable-reference)
+10. [Troubleshooting](#10-troubleshooting)
 
 ---
 
 ## 1. Environments overview
 
-| Git branch | GitHub Environment | Railway project | Purpose |
-|------------|-------------------|-----------------|---------|
-| `dev`      | `development`     | `zenith-dev`    | Test changes before production |
-| `main`     | `production`      | `zenith-prod`   | Live production deployment |
+| Git branch | Railway project | Purpose |
+|------------|-----------------|---------|
+| `dev`      | `zenith-dev`    | Test changes before production |
+| `main`     | `zenith-prod`   | Live production deployment |
 
-Both environments use the **same workflow file** (`.github/workflows/deploy.yml`). The branch name determines which GitHub Environment — and therefore which Railway project and API token — the workflow uses.
+Each Railway project connects directly to this repository. Railway Auto Deploy watches the configured branch for each service and deploys it when new commits land.
 
 ---
 
@@ -71,12 +70,12 @@ Repeat the steps below **twice**: once for the `development` project and once fo
 2. Select this repository (`livectar/zenith`).
 3. Set **Root Directory** to `backend`.
 4. Railway detects `backend/Dockerfile` automatically.
-5. Name the service `backend`.
+5. Name the service `BackEnd`.
 
 ### 3.4 Link the database to the backend
 
-1. Open the **backend** service → **Variables** tab.
-2. Click **+ Add Reference** → select the **postgres** service → select `DATABASE_URL`.
+1. Open the **BackEnd** service → **Variables** tab.
+2. Click **+ Add Reference** → select the **Postgres** service → select `DATABASE_URL`.
 
 Railway will inject `DATABASE_URL` into the backend container on every deployment.
 
@@ -85,9 +84,9 @@ Railway will inject `DATABASE_URL` into the backend container on every deploymen
 1. Click **+ New** → **GitHub Repo** (same repository).
 2. Set **Root Directory** to `frontend`.
 3. Railway detects `frontend/Dockerfile` automatically.
-4. Name the service `frontend`.
+4. Name the service `FrontEnd`.
 
-> **Important:** Disable Railway's automatic deployments on the services you just created — the GitHub Actions workflow will manage all deployments. In each service: **Settings** → **Source** → toggle off **Auto Deploy**.
+> **Important:** Keep Railway **Auto Deploy** enabled for both services. In each service: **Settings** → **Source** → confirm **Auto Deploy** is on.
 
 ---
 
@@ -120,52 +119,23 @@ Set variables directly in the Railway dashboard under each service's **Variables
 
 ---
 
-## 5. Step 3 — Get Railway API tokens
+## 5. Step 3 — Enable Railway Auto Deploy
 
-The GitHub Actions workflow authenticates to Railway using a project-scoped API token.
+For each service in both Railway projects:
 
-1. In the Railway dashboard, open the **`zenith-dev`** project.
-2. Click **Settings** (gear icon) → **Tokens**.
-3. Click **+ Create Token**, name it `github-actions-dev`, copy the value.
-4. Repeat for the **`zenith-prod`** project — name the token `github-actions-prod`.
+1. Open the service (**BackEnd** or **FrontEnd**).
+2. Go to **Settings** → **Source**.
+3. Confirm the repository is connected to `livectar/zenith`.
+4. Confirm the **Root Directory** is correct:
+   - **BackEnd** → `backend`
+   - **FrontEnd** → `frontend`
+5. Turn **Auto Deploy** **on**.
 
-Keep both tokens ready for the next step.
-
----
-
-## 6. Step 4 — Configure GitHub Environments
-
-GitHub Environments let you store separate secrets and variables for each deployment target.
-
-### 6.1 Create the `development` environment
-
-1. In your GitHub repository, go to **Settings** → **Environments**.
-2. Click **New environment**, name it `development`.
-3. Add the following **secret** and **variables**:
-
-| Type | Name | Value |
-|------|------|-------|
-| Secret | `RAILWAY_TOKEN` | The `github-actions-dev` token from step 5 |
-| Variable | `RAILWAY_BACKEND_SERVICE` | `backend` (the service name inside `zenith-dev`) |
-| Variable | `RAILWAY_FRONTEND_SERVICE` | `frontend` (the service name inside `zenith-dev`) |
-
-### 6.2 Create the `production` environment
-
-1. Click **New environment**, name it `production`.
-2. Optionally enable **Required reviewers** to enforce manual approval before production deployments.
-3. Add the following **secret** and **variables**:
-
-| Type | Name | Value |
-|------|------|-------|
-| Secret | `RAILWAY_TOKEN` | The `github-actions-prod` token from step 5 |
-| Variable | `RAILWAY_BACKEND_SERVICE` | `backend` (the service name inside `zenith-prod`) |
-| Variable | `RAILWAY_FRONTEND_SERVICE` | `frontend` (the service name inside `zenith-prod`) |
-
-> **Secrets** are encrypted and never visible in logs. **Variables** appear in logs — using them for non-sensitive service names is intentional.
+> Railway now deploys directly when new commits land on the connected branch. GitHub Actions is no longer part of the normal deploy path.
 
 ---
 
-## 7. Step 5 — Trigger the first deployment
+## 6. Step 4 — Trigger the first deployment
 
 ### Deploy to development
 
@@ -175,40 +145,34 @@ Push any commit to the `dev` branch (or create the branch if it does not exist):
 GitHub → your branch → create PR targeting dev → merge
 ```
 
-Or trigger manually:
-
-```
-GitHub → Actions → "Deploy to Railway" → Run workflow → select branch: dev
-```
-
 ### Deploy to production
 
 Push (or merge a PR) to `main`:
 
 ```
-GitHub → Actions → "Deploy to Railway" → Run workflow → select branch: main
+GitHub → your branch → create PR targeting main → merge
 ```
 
-The workflow automatically selects the correct Railway project based on the branch:
+Railway Auto Deploy uses the branch configured on each service's source settings:
 
-| Branch | GitHub Environment used | Railway project |
-|--------|------------------------|-----------------|
-| `dev`  | `development`          | `zenith-dev`    |
-| `main` | `production`           | `zenith-prod`   |
+| Branch | Railway project |
+|--------|-----------------|
+| `dev`  | `zenith-dev`    |
+| `main` | `zenith-prod`   |
 
 ---
 
-## 8. Step 6 — Verify the deployment
+## 7. Step 5 — Verify the deployment
 
-### Monitor the CI/CD run
+### Monitor the Railway deployment
 
-1. Go to **GitHub → Actions → Deploy to Railway**.
-2. Watch the two jobs: `Deploy Backend` and `Deploy Frontend`.
-3. Both jobs display the environment name in parentheses, e.g. `Deploy Backend (production)`.
+1. Open the Railway project.
+2. Watch the latest deployment under **BackEnd** and **FrontEnd**.
+3. Confirm both deployments reach **Active** status.
 
 ### Check Railway
 
-1. Open the Railway project → the **backend** service → **Deployments** tab.
+1. Open the Railway project → the **BackEnd** service → **Deployments** tab.
 2. The latest deployment should show a green **Active** status.
 
 ### Health check
@@ -224,7 +188,7 @@ The public URL is visible in the backend service → **Settings** → **Domains*
 
 ---
 
-## 9. How CI/CD works (day-to-day)
+## 8. How Auto Deploy works (day-to-day)
 
 ```
 Developer workflow
@@ -235,28 +199,28 @@ Developer workflow
   Pull Request → dev
        │ (merge)
        ▼
-  dev branch  ──► GitHub Actions ──► Deploy to zenith-dev  (development)
+  dev branch  ──► Railway Auto Deploy ──► Deploy to zenith-dev  (development)
        │
   Pull Request → main
        │ (merge, optional: requires reviewer approval)
        ▼
-  main branch ──► GitHub Actions ──► Deploy to zenith-prod (production)
+  main branch ──► Railway Auto Deploy ──► Deploy to zenith-prod (production)
 ```
 
 1. Develop in a feature branch.
-2. Open a PR to `dev` → merge → GitHub Actions deploys to `zenith-dev` automatically.
+2. Open a PR to `dev` → merge → Railway deploys to `zenith-dev` automatically.
 3. Test on the development URL.
-4. Open a PR from `dev` to `main` → merge → GitHub Actions deploys to `zenith-prod` automatically.
+4. Open a PR from `dev` to `main` → merge → Railway deploys to `zenith-prod` automatically.
 
 **Manual redeploy** (without a code change):
 
 ```
-GitHub → Actions → "Deploy to Railway" → Run workflow → choose branch
+Railway → Service → Deployments → Redeploy
 ```
 
 ---
 
-## 10. Environment variable reference
+## 9. Environment variable reference
 
 ### Backend
 
@@ -280,32 +244,23 @@ GitHub → Actions → "Deploy to Railway" → Run workflow → choose branch
 | `BACKEND_URL` | ✅ | — | Public URL of the backend service (no trailing slash) |
 | `PORT` | | *(auto-injected)* | HTTP port — Railway injects this automatically |
 
-### GitHub Environments (per environment)
+## 10. Troubleshooting
 
-| Type | Name | Description |
-|------|------|-------------|
-| Secret | `RAILWAY_TOKEN` | Railway project-scoped API token |
-| Variable | `RAILWAY_BACKEND_SERVICE` | Name of the backend service in the Railway project |
-| Variable | `RAILWAY_FRONTEND_SERVICE` | Name of the frontend service in the Railway project |
+### Auto Deploy does not trigger
 
----
-
-## 11. Troubleshooting
-
-### Deployment job fails with "service not found"
-
-- Check that `RAILWAY_BACKEND_SERVICE` / `RAILWAY_FRONTEND_SERVICE` in the GitHub Environment match the **exact** service names shown in the Railway dashboard.
-- Verify that `RAILWAY_TOKEN` in the GitHub Environment belongs to the correct Railway **project** (dev token for `development` environment, prod token for `production` environment).
+- Open the Railway service → **Settings** → **Source** and confirm **Auto Deploy** is enabled.
+- Verify the service is connected to the correct repository and branch.
+- Confirm the service **Root Directory** is correct: `backend` for **BackEnd**, `frontend` for **FrontEnd**.
 
 ### Frontend returns 502 on `/api/` routes
 
-- Confirm `BACKEND_URL` in the frontend service's Railway variables is the correct public URL of the backend service, with no trailing slash.
+- Confirm `BACKEND_URL` in the **FrontEnd** service's Railway variables is the correct public URL of the **BackEnd** service, with no trailing slash.
 - Check that the backend service is in **Active** status in the Railway dashboard.
 
 ### Backend fails to start: database connection error
 
-- Open the backend service → **Variables** tab and confirm `DATABASE_URL` is listed (it should be referenced from the postgres service, not typed manually).
-- If missing, click **+ Add Reference** → select the postgres service → select `DATABASE_URL`.
+- Open the **BackEnd** service → **Variables** tab and confirm `DATABASE_URL` is listed (it should be referenced from the **Postgres** service, not typed manually).
+- If missing, click **+ Add Reference** → select the **Postgres** service → select `DATABASE_URL`.
 
 ### HD wallet seed not configured
 
@@ -313,8 +268,7 @@ GitHub → Actions → "Deploy to Railway" → Run workflow → choose branch
 - You can generate a new mnemonic at [iancoleman.io/bip39](https://iancoleman.io/bip39) — choose 12 or 24 words and copy the **BIP39 Mnemonic** field.
 - ⚠️ **Never commit the mnemonic to version control.**
 
-### Workflow picks the wrong environment
+### Wrong project or branch deploys
 
-- The workflow uses `github.ref_name == 'main'` to choose `production`; any other branch (including `dev`) uses `development`.
-- Automatic deployment on push only fires for `main` and `dev` (the `on.push.branches` filter).
-- If you trigger the workflow manually via `workflow_dispatch` on a feature branch, it will deploy to the `development` environment/project. Avoid doing this unless intentional.
+- Check each Railway service's **Source** settings and confirm the intended branch is selected.
+- A service only auto-deploys for the repository and branch currently connected in Railway.

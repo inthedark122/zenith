@@ -1,15 +1,10 @@
-name: Deploy to Railway
+name: Deploy to Railway (manual fallback)
 
 on:
-  push:
-    branches: [main, dev]
   workflow_dispatch:
 
-# Determine target environment from the branch name:
-#   main → production
-#   dev  → development
-# Each GitHub Environment stores its own RAILWAY_TOKEN and service name variables,
-# so the same workflow deploys to the correct Railway project automatically.
+# Automatic deploys are currently handled by Railway Auto Deploy.
+# This workflow remains as a manual fallback only.
 
 jobs:
   # ─── Backend ───────────────────────────────────────────────────────────────
