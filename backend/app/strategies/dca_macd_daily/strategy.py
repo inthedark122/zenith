@@ -231,7 +231,7 @@ def check_daily_trade_status(
 # ---------------------------------------------------------------------------
 
 _CacheKey = Tuple[str, str, str, str]
-_CacheEntry = Tuple[Optional["MACDSignal"], float]  # (signal, unix_timestamp)
+_CacheEntry = Tuple[Optional[MACDSignal], float]  # (signal, unix_timestamp)
 
 
 class SignalCache:

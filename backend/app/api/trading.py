@@ -226,23 +226,27 @@ def launch_worker(
     if user_exchange_row:
         try:
             exchange_cls = getattr(ccxt, user_exchange_row.exchange_id, None)
-            if exchange_cls is not None:
-                exchange = exchange_cls({
-                    "enableRateLimit": True,
-                    "apiKey": user_exchange_row.api_key,
-                    "secret": user_exchange_row.api_secret,
-                    "password": user_exchange_row.passphrase or "",
-                })
-                balance = exchange.fetch_balance()
-                available = Decimal(str(balance.get("free", {}).get("USDT", 0.0)))
-                if margin > available:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            f"Insufficient exchange balance: margin {margin} USDT "
-                            f"> available {available} USDT on {exchange_id}"
-                        ),
-                    )
+            if exchange_cls is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported exchange: {user_exchange_row.exchange_id}",
+                )
+            exchange = exchange_cls({
+                "enableRateLimit": True,
+                "apiKey": user_exchange_row.api_key,
+                "secret": user_exchange_row.api_secret,
+                "password": user_exchange_row.passphrase or "",
+            })
+            balance = exchange.fetch_balance()
+            available = Decimal(str(balance.get("free", {}).get("USDT", 0.0)))
+            if margin > available:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Insufficient exchange balance: margin {margin} USDT "
+                        f"> available {available} USDT on {exchange_id}"
+                    ),
+                )
         except HTTPException:
             raise
         except Exception:
