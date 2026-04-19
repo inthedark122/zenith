@@ -115,7 +115,7 @@ Set variables directly in the Railway dashboard under each service's **Variables
 |----------|-------|
 | `BACKEND_URL` | The public URL of the **backend** service in the same Railway project, e.g. `https://backend-production-xxxx.up.railway.app` (no trailing slash). Find it in the backend service → **Settings** → **Domains**. |
 
-> `PORT` is injected automatically by Railway — do not set it manually.
+> The frontend container listens on port `80`. Do not append a port to the public URL.
 
 ---
 
@@ -235,7 +235,7 @@ Railway → Service → Deployments → Redeploy
 | `USDT_CONTRACT_ADDRESS` | | `0xdAC17F958D2ee523a2206206994597C13D831ec7` | USDT ERC-20 contract address |
 | `BLOCKCHAIN_POLL_INTERVAL` | | `30` | Seconds between blockchain polls |
 | `MARKET_POLL_INTERVAL` | | `60` | Seconds between market data polls |
-| `PORT` | | *(auto-injected)* | HTTP port — Railway injects this automatically |
+| `PORT` | | *(unused by frontend)* | Frontend nginx listens on port `80` |
 
 ### Frontend
 
