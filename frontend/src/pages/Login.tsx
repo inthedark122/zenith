@@ -1,9 +1,10 @@
-import { Eye, EyeOff, User } from 'lucide-react'
+import { Eye, EyeOff, Mail } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 
-import BrandLogo from '../components/BrandLogo'
+import AuthHeader from '../components/AuthHeader'
+import AuthLayout from '../components/AuthLayout'
 import { useLogin } from '../hooks/useAuth'
 import { Button } from '@/components/ui/button'
 import { InputField } from '@/components/ui/input'
@@ -29,12 +30,8 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col px-6 pt-16 pb-10">
-      {/* Heading row */}
-      <div className="flex items-center justify-between mb-10">
-        <h1 className="text-3xl font-bold text-foreground leading-tight">Welcome Back</h1>
-        <BrandLogo compact className="w-24 h-24 object-contain" alt="Zenith" />
-      </div>
+    <AuthLayout>
+      <AuthHeader title="Welcome Back" subtitle="Sign in to your account" />
 
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 flex-1">
         {loginMutation.error && (
@@ -48,7 +45,7 @@ export default function Login() {
           <InputField
             type="email"
             placeholder="Email"
-            icon={<User size={18} />}
+            icon={<Mail size={18} />}
             {...register('email', { required: 'Email is required' })}
           />
           {errors.email && (
@@ -88,7 +85,7 @@ export default function Login() {
             />
             <div
               className={`w-5 h-5 rounded flex items-center justify-center border transition-colors ${
-                agreed ? 'bg-[#6c47ff] border-[#6c47ff]' : 'border-border bg-[#111]'
+                agreed ? 'bg-[#6c47ff] border-[#6c47ff]' : 'border-border bg-input'
               }`}
             >
               {agreed && (
@@ -101,7 +98,7 @@ export default function Login() {
           <span className="text-muted-foreground text-sm leading-snug">
             By logging in, you confirm that you have read, understood, and fully agree to the terms under{' '}
             <a href="#" className="text-[#6c47ff] font-semibold hover:underline">
-              Zenith's User Agreement and Authorization Consent
+              Zenith&apos;s User Agreement and Authorization Consent
             </a>
           </span>
         </label>
@@ -124,6 +121,6 @@ export default function Login() {
           </Link>
         </p>
       </form>
-    </div>
+    </AuthLayout>
   )
 }

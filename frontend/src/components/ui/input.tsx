@@ -8,7 +8,7 @@ const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLI
       <input
         type={type}
         className={cn(
-          'flex h-10 w-full rounded-lg border border-border bg-input px-3.5 py-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
+          'flex h-14 w-full rounded-2xl border border-border bg-input px-5 text-base text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 transition-colors',
           className,
         )}
         ref={ref}
@@ -28,12 +28,8 @@ const InputField = React.forwardRef<HTMLInputElement, InputFieldProps>(
   ({ className, icon, onIconClick, ...props }, ref) => {
     return (
       <div className="relative">
-        <input
-          className={cn(
-            'flex h-14 w-full rounded-xl border border-border bg-[#111] px-4 text-base text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
-            icon ? 'pr-12' : '',
-            className,
-          )}
+        <Input
+          className={cn(icon ? 'pr-14' : '', className)}
           ref={ref}
           {...props}
         />

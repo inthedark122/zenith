@@ -3,7 +3,8 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 
-import BrandLogo from '../components/BrandLogo'
+import AuthHeader from '../components/AuthHeader'
+import AuthLayout from '../components/AuthLayout'
 import { useRegister } from '../hooks/useAuth'
 import { Button } from '@/components/ui/button'
 import { InputField } from '@/components/ui/input'
@@ -29,12 +30,8 @@ export default function Register() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col px-6 pt-16 pb-10">
-      {/* Heading row */}
-      <div className="flex items-center justify-between mb-10">
-        <h1 className="text-3xl font-bold text-foreground leading-tight">Create Account</h1>
-        <BrandLogo compact className="w-24 h-24 object-contain" alt="Zenith" />
-      </div>
+    <AuthLayout>
+      <AuthHeader title="Create Account" subtitle="Join Zenith to start trading" />
 
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 flex-1">
         {registerMutation.error && (
@@ -98,7 +95,7 @@ export default function Register() {
           disabled={registerMutation.isPending}
           className="w-full mt-4"
         >
-          {registerMutation.isPending ? 'Creating account…' : 'Register'}
+          {registerMutation.isPending ? 'Creating account…' : 'Create Account'}
         </Button>
 
         <p className="text-center text-muted-foreground text-sm mt-2">
@@ -108,6 +105,6 @@ export default function Register() {
           </Link>
         </p>
       </form>
-    </div>
+    </AuthLayout>
   )
 }
