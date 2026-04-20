@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any, Dict, List, Optional
-
-import ccxt
 
 from app.models.strategy import STRATEGY_DCA_MACD_DAILY, Strategy
 from app.services.exchange_factory import create_exchange
@@ -15,23 +14,26 @@ from app.strategies.dca_macd_daily.strategy import (
 )
 
 _ASSUMPTION_NOTES_SPOT = [
-    "Uses OKX daily OHLCV candles — SPOT market (leverage = 1×).",
-    "Bullish D1 MACD crossover → LONG only (spot cannot short-sell).",
-    "Entry at the open of the candle following the crossover signal.",
+    "D1 MACD crossover identifies the trade direction for the following day (SPOT, LONG only).",
+    "Entry at the open of the first 15-minute candle on the execution day.",
     "SL = 5% below entry; TP = 10% above entry (1:2 RR on price movement).",
+    "TP/SL are checked against each 15m candle high/low for precise timing.",
     "Maximum 2 trades per symbol per calendar day.",
-    "If SL and TP are both touched within the same candle, SL wins (conservative).",
+    "If the first trade hits SL, a correction entry fires at the next 15m candle open.",
+    "If SL and TP are both touched within the same 15m candle, SL wins (conservative).",
     "Open trades still active at the end of the lookback window are closed at the last close.",
 ]
 
 _ASSUMPTION_NOTES_FUTURES = [
-    "Uses OKX daily OHLCV candles — FUTURES market (leverage > 1×).",
-    "Bullish D1 MACD crossover → LONG; bearish crossover → SHORT.",
-    "Entry at the open of the candle following the crossover signal.",
-    "SL = 100% of margin; TP = 200% of margin (1:2 RR).",
+    "D1 MACD crossover identifies the trade direction for the following day (FUTURES).",
+    "Bullish crossover → LONG; bearish crossover → SHORT.",
+    "Entry at the open of the first 15-minute candle on the execution day.",
+    "SL = 100% of margin (1/leverage price move); TP = 200% of margin (rr_ratio/leverage).",
     "PnL = price_change% × leverage × margin (directional per side).",
+    "TP/SL are checked against each 15m candle high/low for precise timing.",
     "Maximum 2 trades per symbol per calendar day.",
-    "If SL and TP are both touched within the same candle, SL wins (conservative).",
+    "If the first trade hits SL, a correction entry fires at the next 15m candle open.",
+    "If SL and TP are both touched within the same 15m candle, SL wins (conservative).",
     "Open trades still active at the end of the lookback window are closed at the last close.",
 ]
 
@@ -41,7 +43,6 @@ class _OpenTrade:
     symbol: str
     side: str           # "long" or "short"
     opened_at: datetime
-    opened_index: int
     entry_price: float
     take_profit_price: float
     stop_loss_price: float
@@ -135,7 +136,7 @@ def _summarize_orders(
             max_drawdown_pct = (drawdown / peak) * 100 if peak > 0 else 0.0
 
     return {
-        "timeframe": "1d",
+        "timeframe": "1d/15m",
         "lookback_days": lookback_days,
         "margin_per_trade": round(margin_per_trade, 2),
         "generated_at": datetime.now(tz=UTC).replace(tzinfo=None),
@@ -161,6 +162,22 @@ def _summarize_orders(
     }
 
 
+def _fetch_15m_paginated(exchange, symbol: str, since_ms: int, until_ms: int) -> List:
+    """Fetch all 15m candles in [since_ms, until_ms) using paginated requests."""
+    all_candles: List = []
+    current = since_ms
+    while current < until_ms:
+        batch = exchange.fetch_ohlcv(symbol, "15m", since=current, limit=1000)
+        if not batch:
+            break
+        in_range = [c for c in batch if since_ms <= c[0] < until_ms]
+        all_candles.extend(in_range)
+        if batch[-1][0] >= until_ms - 1 or len(batch) < 100:
+            break
+        current = batch[-1][0] + 1
+    return all_candles
+
+
 def run_strategy_backtest(
     strategy: Strategy,
     *,
@@ -171,121 +188,157 @@ def run_strategy_backtest(
         raise ValueError(f"Backtesting is not implemented for strategy '{strategy.strategy}'")
 
     exchange = create_exchange("okx")
-    limit = min(max(lookback_days + 60, 120), 1000)
+    d1_limit = min(max(lookback_days + 60, 120), 1000)
     leverage = float(strategy.leverage)
     rr_ratio = float(strategy.rr_ratio)
-    # leverage=1 → spot (LONG only); leverage>1 → futures (LONG + SHORT)
     is_futures = leverage > 1.0
     assumption_notes = _ASSUMPTION_NOTES_FUTURES if is_futures else _ASSUMPTION_NOTES_SPOT
+
     all_orders: List[Dict[str, Any]] = []
     symbol_results: List[Dict[str, Any]] = []
     overall_period_start: Optional[datetime] = None
     overall_period_end: Optional[datetime] = None
 
     for symbol in strategy.symbols or []:
-        candles = exchange.fetch_ohlcv(symbol, timeframe="1d", limit=limit)
-        if len(candles) < 35:
+        # ── Step 1: D1 candles for MACD signal detection ──────────────────
+        d1_candles = exchange.fetch_ohlcv(symbol, timeframe="1d", limit=d1_limit)
+        if len(d1_candles) < 35:
             symbol_results.append(_build_symbol_summary(symbol, []))
             continue
 
-        symbol_orders: List[Dict[str, Any]] = []
-        closes: List[float] = []
-        open_trade: Optional[_OpenTrade] = None
-        pending_entry: Optional[str] = None
-        daily_trade_count: Dict[date, int] = {}
-
-        symbol_period_start = datetime.fromtimestamp(candles[0][0] / 1000, tz=UTC)
-        symbol_period_end = datetime.fromtimestamp(candles[-1][0] / 1000, tz=UTC)
+        symbol_period_start = datetime.fromtimestamp(d1_candles[0][0] / 1000, tz=UTC)
+        symbol_period_end = datetime.fromtimestamp(d1_candles[-1][0] / 1000, tz=UTC)
         if overall_period_start is None or symbol_period_start < overall_period_start:
             overall_period_start = symbol_period_start
         if overall_period_end is None or symbol_period_end > overall_period_end:
             overall_period_end = symbol_period_end
 
-        for index, candle in enumerate(candles):
-            timestamp, open_c, high_c, low_c, close_c, _volume = candle
-            candle_dt = datetime.fromtimestamp(timestamp / 1000, tz=UTC)
-            candle_date = candle_dt.date()
-            open_price = float(open_c)
-            high_price = float(high_c)
-            low_price = float(low_c)
-            close_price = float(close_c)
-            closes.append(close_price)
+        # Build D1 close lookup keyed by date
+        d1_close_by_date: Dict[date, float] = {
+            datetime.fromtimestamp(c[0] / 1000, tz=UTC).date(): float(c[4])
+            for c in d1_candles
+        }
+        d1_close_dates = sorted(d1_close_by_date.keys())
 
-            # ── Step 1: open pending entry at this candle's open ──────────
+        # ── Step 2: Fetch 15m candles for the full period ─────────────────
+        since_ms = d1_candles[0][0]
+        until_ms = d1_candles[-1][0] + 86_400_000  # include last D1 day
+        m15_candles = _fetch_15m_paginated(exchange, symbol, since_ms, until_ms)
+
+        m15_by_date: Dict[date, List] = defaultdict(list)
+        for c in m15_candles:
+            m15_by_date[datetime.fromtimestamp(c[0] / 1000, tz=UTC).date()].append(c)
+
+        # ── Step 3: Day-by-day simulation on 15m candles ──────────────────
+        symbol_orders: List[Dict[str, Any]] = []
+        daily_trade_count: Dict[date, int] = defaultdict(int)
+        open_trade: Optional[_OpenTrade] = None
+        pending_entry: Optional[str] = None  # "long" or "short"
+
+        d1_closes: List[float] = []
+        d1_close_ptr = 0
+
+        for sim_date in sorted(m15_by_date.keys()):
+            # Accumulate D1 closes for days strictly before this simulation day
+            while (
+                d1_close_ptr < len(d1_close_dates)
+                and d1_close_dates[d1_close_ptr] < sim_date
+            ):
+                d1_closes.append(d1_close_by_date[d1_close_dates[d1_close_ptr]])
+                d1_close_ptr += 1
+
+            # Check for a D1 MACD signal at the start of the day
+            # (only when flat — no open trade, no pending entry, enough history)
+            if open_trade is None and pending_entry is None and len(d1_closes) >= 34:
+                signal = get_macd_signal(d1_closes)
+                if signal is not None:
+                    if signal.is_bullish_crossover and daily_trade_count[sim_date] < 2:
+                        pending_entry = "long"
+                    elif signal.is_bearish_crossover and is_futures and daily_trade_count[sim_date] < 2:
+                        pending_entry = "short"
+
+            for m15_candle in sorted(m15_by_date[sim_date], key=lambda c: c[0]):
+                ts, open_c, high_c, low_c, _close_c, _vol = m15_candle
+                candle_dt = datetime.fromtimestamp(ts / 1000, tz=UTC)
+                open_p = float(open_c)
+                high_p = float(high_c)
+                low_p = float(low_c)
+
+                # Open pending entry at this candle's open
+                if pending_entry is not None and open_trade is None:
+                    if daily_trade_count[sim_date] < 2:
+                        side = pending_entry
+                        open_trade = _OpenTrade(
+                            symbol=symbol,
+                            side=side,
+                            opened_at=candle_dt,
+                            entry_price=open_p,
+                            take_profit_price=calculate_take_profit(
+                                open_p, margin_per_trade, leverage, rr_ratio, side
+                            ),
+                            stop_loss_price=calculate_stop_loss(
+                                open_p, margin_per_trade, leverage, side
+                            ),
+                        )
+                        daily_trade_count[sim_date] += 1
+                    pending_entry = None
+
+                # Check TP/SL for open trade
+                if open_trade is not None:
+                    if open_trade.side == "long":
+                        hit_sl = low_p <= open_trade.stop_loss_price
+                        hit_tp = high_p >= open_trade.take_profit_price
+                    else:
+                        hit_sl = high_p >= open_trade.stop_loss_price
+                        hit_tp = low_p <= open_trade.take_profit_price
+
+                    if hit_sl and hit_tp:
+                        hit_tp = False  # conservative: SL wins
+
+                    if hit_sl or hit_tp:
+                        close_p = open_trade.stop_loss_price if hit_sl else open_trade.take_profit_price
+                        reason = "stop_loss" if hit_sl else "take_profit"
+                        bars_held = max(
+                            int((candle_dt - open_trade.opened_at).total_seconds() / 900), 1
+                        )
+                        completed_side = open_trade.side
+                        symbol_orders.append(
+                            _finalize_trade(
+                                open_trade=open_trade,
+                                closed_at=candle_dt,
+                                close_price=close_p,
+                                close_reason=reason,
+                                margin_per_trade=margin_per_trade,
+                                leverage=leverage,
+                                bars_held=bars_held,
+                            )
+                        )
+                        open_trade = None
+
+                        # Queue correction entry at next 15m candle (same day only)
+                        if reason == "stop_loss" and daily_trade_count[sim_date] < 2:
+                            pending_entry = completed_side
+
+            # Discard any pending correction that couldn't fire before day end
             if pending_entry is not None and open_trade is None:
-                side = pending_entry
-                entry = open_price
-                open_trade = _OpenTrade(
-                    symbol=symbol,
-                    side=side,
-                    opened_at=candle_dt,
-                    opened_index=index,
-                    entry_price=entry,
-                    take_profit_price=calculate_take_profit(entry, margin_per_trade, leverage, rr_ratio, side),
-                    stop_loss_price=calculate_stop_loss(entry, margin_per_trade, leverage, side),
-                )
-                daily_trade_count[candle_date] = daily_trade_count.get(candle_date, 0) + 1
                 pending_entry = None
 
-            # ── Step 2: check SL / TP for the open trade ──────────────────
-            if open_trade is not None:
-                if open_trade.side == "long":
-                    hit_sl = low_price <= open_trade.stop_loss_price
-                    hit_tp = high_price >= open_trade.take_profit_price
-                else:  # short (futures only)
-                    hit_sl = high_price >= open_trade.stop_loss_price
-                    hit_tp = low_price <= open_trade.take_profit_price
-
-                if hit_sl and hit_tp:
-                    hit_tp = False  # conservative: SL wins when both touched same candle
-
-                if hit_sl or hit_tp:
-                    close_p = open_trade.stop_loss_price if hit_sl else open_trade.take_profit_price
-                    reason = "stop_loss" if hit_sl else "take_profit"
-                    symbol_orders.append(
-                        _finalize_trade(
-                            open_trade=open_trade,
-                            closed_at=candle_dt,
-                            close_price=close_p,
-                            close_reason=reason,
-                            margin_per_trade=margin_per_trade,
-                            leverage=leverage,
-                            bars_held=max(index - open_trade.opened_index, 1),
-                        )
-                    )
-                    open_trade = None
-
-            # ── Step 3: look for a new MACD signal ────────────────────────
-            if open_trade is not None or pending_entry is not None:
-                continue
-            if index >= len(candles) - 1:
-                continue
-
-            signal = get_macd_signal(closes)
-            if signal is None:
-                continue
-
-            next_date = datetime.fromtimestamp(candles[index + 1][0] / 1000, tz=UTC).date()
-            if daily_trade_count.get(next_date, 0) >= 2:
-                continue
-
-            if signal.is_bullish_crossover:
-                pending_entry = "long"
-            elif signal.is_bearish_crossover and is_futures:
-                # SHORT only available in futures mode
-                pending_entry = "short"
-
-        # Force-close any trade still open at end of window
-        if open_trade is not None:
+        # Force-close any trade still open at end of the period
+        if open_trade is not None and m15_candles:
+            last_c = m15_candles[-1]
+            last_dt = datetime.fromtimestamp(last_c[0] / 1000, tz=UTC)
+            bars_held = max(
+                int((last_dt - open_trade.opened_at).total_seconds() / 900), 1
+            )
             symbol_orders.append(
                 _finalize_trade(
                     open_trade=open_trade,
-                    closed_at=symbol_period_end,
-                    close_price=float(candles[-1][4]),
+                    closed_at=last_dt,
+                    close_price=float(last_c[4]),
                     close_reason="final_close",
                     margin_per_trade=margin_per_trade,
                     leverage=leverage,
-                    bars_held=max(len(candles) - 1 - open_trade.opened_index, 1),
+                    bars_held=bars_held,
                 )
             )
 
