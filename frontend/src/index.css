@@ -31,7 +31,7 @@
 }
 
 /* Global resets */
-* {
+*, *::before, *::after {
   box-sizing: border-box;
 }
 
@@ -40,4 +40,15 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: var(--color-background);
   color: var(--color-foreground);
+}
+
+/* Autofill override — CSS variables don't resolve in webkit-autofill context so use hardcoded values */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #141414 inset !important;
+  -webkit-text-fill-color: #f9f9f9 !important;
+  caret-color: #f9f9f9;
+  transition: background-color 5000s ease-in-out 0s;
 }
