@@ -1,13 +1,8 @@
-import { Eye, EyeOff, Zap } from 'lucide-react'
+import { Eye, EyeOff, Mail } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { Link } from 'react-router-dom'
 
 import { useLogin } from '../hooks/useAuth'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 
 interface LoginFormValues {
   email: string
@@ -30,105 +25,130 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-6">
-      <Card className="w-full max-w-[400px] p-10">
-        <CardHeader className="items-center p-0 mb-6">
-          <div className="w-14 h-14 bg-gradient-to-br from-[#6c47ff] to-[#a78bfa] rounded-full flex items-center justify-center mb-4">
-            <Zap size={28} className="text-white" />
-          </div>
-          <h1 className="text-2xl font-bold text-foreground">Welcome Back</h1>
-          <p className="text-muted-foreground text-sm mt-1">Sign in to Zenith Trading Bot</p>
-        </CardHeader>
+    <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center relative overflow-hidden">
+      {/* Orange accent stripe on the right */}
+      <div className="absolute right-0 top-0 bottom-0 w-1.5 bg-gradient-to-b from-[#f9a825] via-[#ff6f00] to-[#f9a825]" />
 
-        <CardContent className="p-0">
-          {loginMutation.error && (
-            <p className="text-destructive text-xs mb-3 text-center">
-              {loginMutation.error.message ?? 'Login failed'}
-            </p>
-          )}
+      <div className="w-full max-w-sm px-6 py-10">
+        {/* Header: title + logo */}
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-3xl font-bold text-white leading-tight">Welcome Back</h1>
+          <img
+            src="/zenith-logo.svg"
+            alt="ZenithCrypto"
+            className="h-16 w-auto flex-shrink-0"
+          />
+        </div>
 
-          <form onSubmit={handleSubmit(onSubmit)}>
-            <div className="mb-4">
-              <Label htmlFor="email">Email</Label>
-              <Input
+        {loginMutation.error && (
+          <p className="text-red-400 text-xs mb-4 text-center">
+            {loginMutation.error.message ?? 'Login failed'}
+          </p>
+        )}
+
+        <form onSubmit={handleSubmit(onSubmit)} noValidate>
+          {/* Email field */}
+          <div className="mb-4">
+            <div className="relative">
+              <input
                 id="email"
                 type="email"
-                placeholder="Enter your email"
+                placeholder="Email"
+                autoComplete="email"
+                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-4 py-3.5 text-white placeholder-gray-500 text-sm outline-none focus:border-[#6c47ff] focus:ring-1 focus:ring-[#6c47ff] transition-colors pr-11"
                 {...register('email', { required: 'Email is required' })}
               />
-              {errors.email && (
-                <p className="text-destructive text-xs mt-1">{errors.email.message}</p>
-              )}
+              <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none">
+                <Mail size={16} />
+              </span>
             </div>
+            {errors.email && (
+              <p className="text-red-400 text-xs mt-1 ml-1">{errors.email.message}</p>
+            )}
+          </div>
 
-            <div className="mb-4">
-              <Label htmlFor="password">Password</Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPw ? 'text' : 'password'}
-                  placeholder="Enter your password"
-                  className="pr-11"
-                  {...register('password', { required: 'Password is required' })}
-                />
-                <button
-                  type="button"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                  onClick={() => setShowPw((p) => !p)}
-                >
-                  {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-              {errors.password && (
-                <p className="text-destructive text-xs mt-1">{errors.password.message}</p>
-              )}
+          {/* Password field */}
+          <div className="mb-3">
+            <div className="relative">
+              <input
+                id="password"
+                type={showPw ? 'text' : 'password'}
+                placeholder="Password"
+                autoComplete="current-password"
+                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-4 py-3.5 text-white placeholder-gray-500 text-sm outline-none focus:border-[#6c47ff] focus:ring-1 focus:ring-[#6c47ff] transition-colors pr-11"
+                {...register('password', { required: 'Password is required' })}
+              />
+              <button
+                type="button"
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+                onClick={() => setShowPw((p) => !p)}
+                aria-label={showPw ? 'Hide password' : 'Show password'}
+              >
+                {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
             </div>
+            {errors.password && (
+              <p className="text-red-400 text-xs mt-1 ml-1">{errors.password.message}</p>
+            )}
+          </div>
 
+          {/* Forgot password */}
+          <div className="flex justify-end mb-5">
             <a
               href="#"
-              className="block text-right text-[#6c47ff] text-xs mb-5 no-underline hover:underline"
+              className="text-gray-400 text-xs hover:text-white transition-colors no-underline"
             >
-              Forgot Password?
+              Forgot Password
             </a>
+          </div>
 
-            <div className="flex items-center gap-2 mb-6">
+          {/* Terms checkbox */}
+          <div className="flex items-start gap-3 mb-6">
+            <label className="relative flex-shrink-0 mt-0.5 cursor-pointer">
               <input
                 type="checkbox"
                 id="agree"
                 checked={agreed}
                 onChange={(e) => setAgreed(e.target.checked)}
-                className="accent-[#6c47ff]"
+                className="sr-only"
               />
-              <label htmlFor="agree" className="text-muted-foreground text-xs">
-                I agree to the{' '}
-                <a href="#" className="text-[#6c47ff] no-underline hover:underline">
-                  Terms of Service
-                </a>{' '}
-                and{' '}
-                <a href="#" className="text-[#6c47ff] no-underline hover:underline">
-                  Privacy Policy
-                </a>
-              </label>
-            </div>
+              <div
+                className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${
+                  agreed ? 'bg-[#6c47ff]' : 'bg-[#2a2a2a] border border-[#444]'
+                }`}
+              >
+                {agreed && (
+                  <svg
+                    className="w-3 h-3 text-white"
+                    fill="none"
+                    viewBox="0 0 12 12"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                  >
+                    <path d="M2 6l3 3 5-5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </div>
+            </label>
+            <label htmlFor="agree" className="text-gray-400 text-xs leading-relaxed cursor-pointer">
+              By logging in, you confirm that you have read, understood, and fully agree to the
+              terms under{' '}
+              <a href="#" className="text-[#42a5f5] no-underline hover:underline">
+                CoinTech2u&apos;s User Agreement and Authorization Consent
+              </a>
+            </label>
+          </div>
 
-            <Button
-              type="submit"
-              size="lg"
-              disabled={loginMutation.isPending || !agreed}
-              className="w-full mb-5"
-            >
-              {loginMutation.isPending ? 'Signing in…' : 'Login'}
-            </Button>
-          </form>
-
-          <p className="text-center text-muted-foreground text-sm">
-            Don&apos;t have an account?{' '}
-            <Link to="/register" className="text-[#6c47ff] no-underline hover:underline">
-              Register
-            </Link>
-          </p>
-        </CardContent>
-      </Card>
+          {/* Log In button */}
+          <button
+            type="submit"
+            disabled={loginMutation.isPending || !agreed}
+            className="w-full py-3.5 rounded-full bg-[#3a3a3a] text-gray-300 text-sm font-medium tracking-wide transition-all hover:bg-[#4a4a4a] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loginMutation.isPending ? 'Signing in…' : 'Log In'}
+          </button>
+        </form>
+      </div>
     </div>
   )
 }
