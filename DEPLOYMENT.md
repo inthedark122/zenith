@@ -103,7 +103,7 @@ Set variables directly in the Railway dashboard under each service's **Variables
 | `SECRET_KEY` | A long random string (≥ 32 characters) — generate one at [randomkeygen.com](https://randomkeygen.com) |
 | `ALGORITHM` | `HS256` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` |
-| `ADMIN_EMAIL` | Optional operator email that should receive admin access automatically |
+| `ADMIN_EMAIL` | Optional operator email that should receive the `admin` role automatically |
 | `EVM_PAYMENTS_ENABLED` | `false` |
 | `MARKET_POLL_INTERVAL` | `60` |
 
@@ -230,7 +230,7 @@ Railway → Service → Deployments → Redeploy
 | `SECRET_KEY` | ✅ | — | JWT signing secret |
 | `ALGORITHM` | | `HS256` | JWT algorithm |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | | `30` | JWT TTL in minutes |
-| `ADMIN_EMAIL` | | — | If set, matching users are promoted to `is_admin=true` automatically |
+| `ADMIN_EMAIL` | | — | If set, matching users are promoted to `role='admin'` automatically |
 | `EVM_PAYMENTS_ENABLED` | | `false` | Enables the legacy ERC-20 deposit flow when set to `true` |
 | `MARKET_POLL_INTERVAL` | | `60` | Seconds between market data polls |
 | `PORT` | | *(unused by frontend)* | Frontend nginx listens on port `80` |
@@ -274,9 +274,9 @@ Railway → Service → Deployments → Redeploy
 
 ### Admin page is not visible
 
-- Set `ADMIN_EMAIL` on the **BackEnd** service to the operator email that should manage strategies.
-- A newly registered user with that email becomes admin immediately.
-- If the user already exists, the backend promotes that account on startup.
+- Preferred: update the `users.role` column manually in PostgreSQL and set the desired operator account to `admin`.
+- Optional shortcut: set `ADMIN_EMAIL` on the **BackEnd** service; matching users are promoted to `role='admin'` on registration or backend startup.
+- Backtests now persist in `strategy_backtest_runs`, so repeated admin runs are preserved instead of overwriting one summary on `strategies`.
 
 ### Wrong project or branch deploys
 

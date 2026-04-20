@@ -42,10 +42,18 @@ class Strategy(Base):
     # Strategy-specific configuration; keys vary per strategy implementation.
     # DCA_MACD_DAILY default: {"max_daily_trades": 2, "max_daily_margin_usd": 0.0}
     settings = Column(JSON, nullable=False, default=dict)
-    backtest_summary = Column(JSON, nullable=True)
-    backtest_updated_at = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     workers = relationship("StrategyWorker", back_populates="strategy")
+    backtest_runs = relationship(
+        "StrategyBacktestRun",
+        back_populates="strategy_template",
+        order_by="desc(StrategyBacktestRun.generated_at)",
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def latest_backtest(self):
+        return self.backtest_runs[0] if self.backtest_runs else None

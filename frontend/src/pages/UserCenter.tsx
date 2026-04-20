@@ -43,7 +43,8 @@ export default function UserCenter() {
   const { user, logout } = useAuthStore()
   const { data: mySubs = [] } = useMySubs()
   const activeSub = mySubs.find((s) => s.status === 'active') ?? null
-  const visibleMenuItems = user?.is_admin
+  const isAdmin = user?.role === 'admin' || user?.is_admin
+  const visibleMenuItems = isAdmin
     ? [...menuItems, { icon: Shield, label: 'Admin Strategy Lab', path: '/admin/strategies' }]
     : menuItems
 

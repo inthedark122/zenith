@@ -1,16 +1,16 @@
-"""Admin API — strategy management and backtesting."""
-from datetime import datetime
 from typing import List
 
 import ccxt
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.deps import get_current_admin, get_db
+from app.models.backtest import StrategyBacktestRun
 from app.models.strategy import Strategy
 from app.models.user import User
 from app.schemas.strategy import (
     StrategyBacktestRequest,
+    StrategyBacktestRunResponse,
     StrategyCreate,
     StrategyResponse,
     StrategyUpdate,
@@ -26,7 +26,12 @@ def list_strategies(
     _admin: User = Depends(get_current_admin),
 ):
     """List all strategy templates (active and inactive)."""
-    return db.query(Strategy).order_by(Strategy.id.asc()).all()
+    return (
+        db.query(Strategy)
+        .options(selectinload(Strategy.backtest_runs))
+        .order_by(Strategy.id.asc())
+        .all()
+    )
 
 
 @router.post("/strategies", response_model=StrategyResponse, status_code=status.HTTP_201_CREATED)
@@ -51,7 +56,12 @@ def update_strategy(
     _admin: User = Depends(get_current_admin),
 ):
     """Update an existing strategy template."""
-    strategy = db.query(Strategy).filter(Strategy.id == strategy_id).first()
+    strategy = (
+        db.query(Strategy)
+        .options(selectinload(Strategy.backtest_runs))
+        .filter(Strategy.id == strategy_id)
+        .first()
+    )
     if strategy is None:
         raise HTTPException(status_code=404, detail="Strategy not found")
 
@@ -77,7 +87,26 @@ def delete_strategy(
     db.commit()
 
 
-@router.post("/strategies/{strategy_id}/backtest", response_model=StrategyResponse)
+@router.get("/strategies/{strategy_id}/backtests", response_model=List[StrategyBacktestRunResponse])
+def list_backtests(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
+):
+    strategy = db.query(Strategy).filter(Strategy.id == strategy_id).first()
+    if strategy is None:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    return (
+        db.query(StrategyBacktestRun)
+        .options(selectinload(StrategyBacktestRun.strategy_template))
+        .filter(StrategyBacktestRun.strategy_id == strategy_id)
+        .order_by(StrategyBacktestRun.generated_at.desc(), StrategyBacktestRun.id.desc())
+        .all()
+    )
+
+
+@router.post("/strategies/{strategy_id}/backtest", response_model=StrategyBacktestRunResponse)
 def run_backtest(
     strategy_id: int,
     payload: StrategyBacktestRequest,
@@ -89,10 +118,13 @@ def run_backtest(
         raise HTTPException(status_code=404, detail="Strategy not found")
 
     try:
-        strategy.backtest_summary = run_strategy_backtest(
-            strategy,
-            lookback_days=payload.lookback_days,
-            margin_per_trade=payload.margin_per_trade,
+        backtest_run = StrategyBacktestRun(
+            strategy_id=strategy.id,
+            **run_strategy_backtest(
+                strategy,
+                lookback_days=payload.lookback_days,
+                margin_per_trade=payload.margin_per_trade,
+            ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -102,7 +134,8 @@ def run_backtest(
             detail=f"Backtest failed: {exc}",
         )
 
-    strategy.backtest_updated_at = datetime.utcnow()
+    backtest_run.strategy_template = strategy
+    db.add(backtest_run)
     db.commit()
-    db.refresh(strategy)
-    return strategy
+    db.refresh(backtest_run)
+    return backtest_run

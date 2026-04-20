@@ -20,6 +20,7 @@ from app.core.config import settings  # noqa: E402
 
 # Register all models with the metadata
 import app.models.exchange      # noqa: F401
+import app.models.backtest      # noqa: F401
 import app.models.referral      # noqa: F401
 import app.models.strategy      # noqa: F401
 import app.models.subscription  # noqa: F401

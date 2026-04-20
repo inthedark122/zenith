@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import api_router
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.models.user import User
+from app.models.user import ADMIN_ROLE, User
 from app.workers.blockchain_listener import blockchain_listener_loop
 from app.workers.market_listener import market_listener_loop
 
@@ -41,9 +41,9 @@ def _promote_configured_admin() -> None:
         if user is None:
             log.info("Configured ADMIN_EMAIL %s not found yet; admin page will unlock after that user registers.", admin_email)
             return
-        if user.is_admin:
+        if user.role == ADMIN_ROLE:
             return
-        user.is_admin = True
+        user.role = ADMIN_ROLE
         db.commit()
         log.info("Granted admin access to %s from ADMIN_EMAIL configuration.", admin_email)
     finally:

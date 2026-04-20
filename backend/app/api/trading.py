@@ -27,7 +27,7 @@ from typing import List, Optional
 
 import ccxt
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.deps import get_current_user, get_db
 from app.models.exchange import UserExchange
@@ -107,6 +107,7 @@ def list_active_strategies(
     """Return all active strategy templates that users can activate."""
     return (
         db.query(Strategy)
+        .options(selectinload(Strategy.backtest_runs))
         .filter(Strategy.is_active)
         .order_by(Strategy.id.asc())
         .all()

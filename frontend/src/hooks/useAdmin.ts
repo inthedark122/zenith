@@ -10,6 +10,19 @@ export function useAdminStrategies() {
   })
 }
 
+export function useStrategyBacktests(strategyId: number | null) {
+  return useQuery({
+    queryKey: ['admin', 'strategy-backtests', strategyId],
+    queryFn: () => {
+      if (strategyId === null) {
+        throw new Error('Strategy ID is required to load backtests')
+      }
+      return adminApi.listBacktests(strategyId)
+    },
+    enabled: strategyId !== null,
+  })
+}
+
 export function useCreateAdminStrategy() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -54,8 +67,9 @@ export function useRunStrategyBacktest() {
       strategyId: number
       payload: StrategyBacktestPayload
     }) => adminApi.runBacktest(strategyId, payload),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'strategies'] })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'strategy-backtests', variables.strategyId] })
       queryClient.invalidateQueries({ queryKey: ['strategies'] })
     },
   })

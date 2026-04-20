@@ -7,6 +7,10 @@ from sqlalchemy.orm import relationship
 
 from app.db.base import Base
 
+USER_ROLE = "user"
+ADMIN_ROLE = "admin"
+SUPPORTED_USER_ROLES = (USER_ROLE, ADMIN_ROLE)
+
 
 def _generate_referral_code() -> str:
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
@@ -22,7 +26,7 @@ class User(Base):
     referral_code = Column(String(6), unique=True, index=True, nullable=False, default=_generate_referral_code)
     referred_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     is_active = Column(Boolean, default=True)
-    is_admin = Column(Boolean, default=False)
+    role = Column(String, nullable=False, default=USER_ROLE, server_default=USER_ROLE)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     referrer = relationship("User", remote_side=[id], backref="referrals")
@@ -31,3 +35,7 @@ class User(Base):
     exchanges = relationship("UserExchange", back_populates="user")
     strategy_workers = relationship("StrategyWorker", back_populates="user")
     strategy_trades = relationship("StrategyTrade", back_populates="user")
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == ADMIN_ROLE

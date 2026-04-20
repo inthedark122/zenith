@@ -3,7 +3,8 @@ export interface User {
   email: string
   username: string
   referral_code: string
-  is_admin: boolean
+  role: string
+  is_admin?: boolean
 }
 
 export interface AuthResponse {
@@ -60,6 +61,8 @@ export interface StrategyBacktestSymbolSummary {
 }
 
 export interface StrategyBacktestSummary {
+  id: number
+  strategy_id: number
   strategy: string
   timeframe: string
   lookback_days: number
@@ -72,8 +75,39 @@ export interface StrategyBacktestSummary {
   wins: number
   losses: number
   win_rate: number
+  gross_profit_usd: number
+  gross_loss_usd: number
   net_profit_usd: number
+  avg_win_usd: number
+  avg_loss_usd: number
+  profit_factor?: number | null
+  max_drawdown_usd: number
+  max_drawdown_pct: number
+  best_trade_usd?: number | null
+  worst_trade_usd?: number | null
   symbol_results: StrategyBacktestSymbolSummary[]
+}
+
+export interface StrategyBacktestOrder {
+  symbol: string
+  side: string
+  status: 'win' | 'loss'
+  opened_at: string
+  closed_at: string
+  entry_price: number
+  exit_price: number
+  take_profit_price: number
+  stop_loss_price: number
+  margin_per_trade: number
+  leverage: number
+  pnl_usd: number
+  pnl_pct: number
+  close_reason: string
+  bars_held: number
+}
+
+export interface StrategyBacktestRun extends StrategyBacktestSummary {
+  orders: StrategyBacktestOrder[]
 }
 
 export interface Strategy {
@@ -84,8 +118,7 @@ export interface Strategy {
   rr_ratio: number
   symbols: string[]
   settings?: StrategySettings
-  backtest_summary?: StrategyBacktestSummary | null
-  backtest_updated_at?: string | null
+  latest_backtest?: StrategyBacktestSummary | null
   is_active?: boolean
   created_at?: string
   updated_at?: string

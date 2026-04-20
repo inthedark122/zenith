@@ -126,41 +126,53 @@ function StrategyCard({
         </p>
       </div>
 
-      {strategy.backtest_summary && (
+      {strategy.latest_backtest && (
         <Card className="p-3.5 mb-4 bg-input border-border">
           <div className="flex justify-between items-start gap-3 mb-2">
             <div>
-              <div className="text-foreground font-semibold text-sm">Historical Backtest</div>
+              <div className="text-foreground font-semibold text-sm">Latest Published Backtest</div>
               <div className="text-muted-foreground text-xs mt-1">
-                {strategy.backtest_summary.period_start} → {strategy.backtest_summary.period_end}
+                {strategy.latest_backtest.period_start} → {strategy.latest_backtest.period_end}
               </div>
             </div>
             <Badge
-              variant={strategy.backtest_summary.net_profit_usd >= 0 ? 'success' : 'destructive'}
+              variant={strategy.latest_backtest.net_profit_usd >= 0 ? 'success' : 'destructive'}
             >
-              {strategy.backtest_summary.net_profit_usd >= 0 ? '+' : ''}
-              {strategy.backtest_summary.net_profit_usd.toFixed(2)} USDT
+              {strategy.latest_backtest.net_profit_usd >= 0 ? '+' : ''}
+              {strategy.latest_backtest.net_profit_usd.toFixed(2)} USDT
             </Badge>
           </div>
-          <div className="grid grid-cols-2 gap-2 text-xs mb-2">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mb-2">
             <div>
               <div className="text-muted-foreground">Trades</div>
               <div className="text-foreground font-semibold">
-                {strategy.backtest_summary.total_trades}
+                {strategy.latest_backtest.total_trades}
               </div>
             </div>
             <div>
               <div className="text-muted-foreground">Win rate</div>
               <div className="text-foreground font-semibold">
-                {strategy.backtest_summary.win_rate.toFixed(2)}%
+                {strategy.latest_backtest.win_rate.toFixed(2)}%
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Max DD</div>
+              <div className="text-foreground font-semibold">
+                -{strategy.latest_backtest.max_drawdown_usd.toFixed(2)} USDT
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Profit factor</div>
+              <div className="text-foreground font-semibold">
+                {strategy.latest_backtest.profit_factor?.toFixed(2) ?? '—'}
               </div>
             </div>
           </div>
           <div className="text-muted-foreground text-[11px] mb-2">
-            Backtest uses {strategy.backtest_summary.lookback_days} daily candles with $
-            {strategy.backtest_summary.margin_per_trade}/trade.
+            Backtest uses {strategy.latest_backtest.lookback_days} daily candles with $
+            {strategy.latest_backtest.margin_per_trade}/trade.
           </div>
-          {strategy.backtest_summary.symbol_results.slice(0, 3).map((result) => (
+          {strategy.latest_backtest.symbol_results.slice(0, 3).map((result) => (
             <div key={result.symbol} className="flex justify-between text-xs mb-1">
               <span className="text-foreground">{result.symbol}</span>
               <span className="text-muted-foreground">

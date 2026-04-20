@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, field_validator
@@ -86,20 +86,55 @@ class StrategyBacktestSymbolSummary(BaseModel):
 
 
 class StrategyBacktestSummary(BaseModel):
+    id: int
+    strategy_id: int
     strategy: str
     timeframe: str
     lookback_days: int
     margin_per_trade: float
     generated_at: datetime
-    period_start: Optional[str] = None
-    period_end: Optional[str] = None
+    period_start: Optional[date] = None
+    period_end: Optional[date] = None
     assumption_notes: List[str]
     total_trades: int
     wins: int
     losses: int
     win_rate: float
+    gross_profit_usd: float
+    gross_loss_usd: float
     net_profit_usd: float
+    avg_win_usd: float
+    avg_loss_usd: float
+    profit_factor: Optional[float] = None
+    max_drawdown_usd: float
+    max_drawdown_pct: float
+    best_trade_usd: Optional[float] = None
+    worst_trade_usd: Optional[float] = None
     symbol_results: List[StrategyBacktestSymbolSummary]
+
+    model_config = {"from_attributes": True}
+
+
+class StrategyBacktestOrder(BaseModel):
+    symbol: str
+    side: str
+    status: str
+    opened_at: datetime
+    closed_at: datetime
+    entry_price: float
+    exit_price: float
+    take_profit_price: float
+    stop_loss_price: float
+    margin_per_trade: float
+    leverage: float
+    pnl_usd: float
+    pnl_pct: float
+    close_reason: str
+    bars_held: int
+
+
+class StrategyBacktestRunResponse(StrategyBacktestSummary):
+    orders: List[StrategyBacktestOrder]
 
 
 class StrategyResponse(BaseModel):
@@ -110,8 +145,7 @@ class StrategyResponse(BaseModel):
     leverage: float
     rr_ratio: float
     settings: Dict[str, Any]
-    backtest_summary: Optional[StrategyBacktestSummary] = None
-    backtest_updated_at: Optional[datetime] = None
+    latest_backtest: Optional[StrategyBacktestSummary] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime

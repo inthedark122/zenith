@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_current_user, get_db
 from app.core.config import settings
 from app.core.security import create_access_token, get_password_hash, verify_password
-from app.models.user import User
+from app.models.user import ADMIN_ROLE, USER_ROLE, User
 from app.schemas.user import Token, UserCreate, UserResponse
 from app.services.mlm import _get_or_create_referral
 
@@ -43,9 +43,11 @@ def register(payload: UserCreate, db: Session = Depends(get_db)):
         hashed_password=get_password_hash(payload.password),
         referral_code=_generate_unique_referral_code(db),
         referred_by=referred_by_id,
-        is_admin=(
-            bool(settings.ADMIN_EMAIL)
+        role=(
+            ADMIN_ROLE
+            if bool(settings.ADMIN_EMAIL)
             and payload.email.strip().lower() == settings.ADMIN_EMAIL.strip().lower()
+            else USER_ROLE
         ),
     )
     db.add(user)

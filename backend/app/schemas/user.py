@@ -22,7 +22,7 @@ class UserResponse(BaseModel):
     username: str
     referral_code: str
     is_active: bool
-    is_admin: bool
+    role: str
     created_at: datetime
 
     model_config = {"from_attributes": True}

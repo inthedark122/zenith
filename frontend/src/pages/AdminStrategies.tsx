@@ -1,5 +1,5 @@
 import { BarChart3, ChevronLeft, FlaskConical, Plus, Save, Shield, Trash2 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import {
@@ -7,9 +7,15 @@ import {
   useCreateAdminStrategy,
   useDeleteAdminStrategy,
   useRunStrategyBacktest,
+  useStrategyBacktests,
   useUpdateAdminStrategy,
 } from '../hooks/useAdmin'
-import { AdminStrategyPayload, Strategy, StrategyBacktestSummary } from '../types'
+import {
+  AdminStrategyPayload,
+  Strategy,
+  StrategyBacktestOrder,
+  StrategyBacktestSummary,
+} from '../types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -46,12 +52,33 @@ function toPayload(strategy: Strategy): AdminStrategyPayload {
   }
 }
 
-function BacktestCard({ summary }: { summary: StrategyBacktestSummary }) {
+function Metric({
+  label,
+  value,
+}: {
+  label: string
+  value: string
+}) {
+  return (
+    <div>
+      <div className="text-muted-foreground text-[11px] uppercase tracking-wide">{label}</div>
+      <div className="text-foreground font-semibold text-sm mt-1">{value}</div>
+    </div>
+  )
+}
+
+function SummaryCard({
+  title,
+  summary,
+}: {
+  title: string
+  summary: StrategyBacktestSummary
+}) {
   return (
     <Card className="p-4 bg-input border-border">
       <div className="flex justify-between items-start gap-3 mb-3">
         <div>
-          <div className="text-foreground font-semibold text-sm">Latest Backtest</div>
+          <div className="text-foreground font-semibold text-sm">{title}</div>
           <div className="text-muted-foreground text-xs mt-1">
             {summary.period_start} → {summary.period_end} • {summary.lookback_days}d • $
             {summary.margin_per_trade}/trade
@@ -62,44 +89,38 @@ function BacktestCard({ summary }: { summary: StrategyBacktestSummary }) {
           {summary.net_profit_usd.toFixed(2)} USDT
         </Badge>
       </div>
-      <div className="grid grid-cols-2 gap-3 text-xs mb-3">
-        <div>
-          <div className="text-muted-foreground">Trades</div>
-          <div className="text-foreground font-semibold">{summary.total_trades}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">Win rate</div>
-          <div className="text-foreground font-semibold">{summary.win_rate.toFixed(2)}%</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">Wins</div>
-          <div className="text-success font-semibold">{summary.wins}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">Losses</div>
-          <div className="text-destructive font-semibold">{summary.losses}</div>
-        </div>
-      </div>
-      {summary.symbol_results.length > 0 && (
-        <div className="space-y-2 mb-3">
-          {summary.symbol_results.map((result) => (
-            <div key={result.symbol} className="flex items-center justify-between text-xs">
-              <div className="text-foreground font-medium">{result.symbol}</div>
-              <div className="text-muted-foreground">
-                {result.total_trades} trades • {result.win_rate.toFixed(2)}% •{' '}
-                {result.net_profit_usd >= 0 ? '+' : ''}
-                {result.net_profit_usd.toFixed(2)} USDT
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="text-muted-foreground text-[11px] space-y-1">
-        {summary.assumption_notes.map((note) => (
-          <div key={note}>• {note}</div>
-        ))}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Metric label="Trades" value={String(summary.total_trades)} />
+        <Metric label="Win Rate" value={`${summary.win_rate.toFixed(2)}%`} />
+        <Metric label="Profit Factor" value={summary.profit_factor?.toFixed(2) ?? '—'} />
+        <Metric label="Max DD" value={`-${summary.max_drawdown_usd.toFixed(2)} USDT`} />
       </div>
     </Card>
+  )
+}
+
+function OrderRow({ order }: { order: StrategyBacktestOrder }) {
+  return (
+    <div className="grid grid-cols-[1.1fr_0.8fr_0.8fr_0.9fr_0.9fr_0.8fr_0.9fr_0.8fr] gap-3 text-xs py-2 border-b border-border last:border-b-0">
+      <div>
+        <div className="text-foreground font-medium">{order.symbol}</div>
+        <div className="text-muted-foreground">
+          {new Date(order.closed_at).toLocaleDateString()} • {order.close_reason}
+        </div>
+      </div>
+      <div className="text-foreground">{order.side.toUpperCase()}</div>
+      <div className={order.status === 'win' ? 'text-success font-semibold' : 'text-destructive font-semibold'}>
+        {order.status.toUpperCase()}
+      </div>
+      <div className="text-foreground">${order.entry_price.toFixed(4)}</div>
+      <div className="text-foreground">${order.exit_price.toFixed(4)}</div>
+      <div className="text-foreground">${order.margin_per_trade.toFixed(2)}</div>
+      <div className={order.pnl_usd >= 0 ? 'text-success font-semibold' : 'text-destructive font-semibold'}>
+        {order.pnl_usd >= 0 ? '+' : ''}
+        {order.pnl_usd.toFixed(2)}
+      </div>
+      <div className="text-muted-foreground">{order.bars_held} bars</div>
+    </div>
   )
 }
 
@@ -112,6 +133,7 @@ export default function AdminStrategies() {
   const runBacktest = useRunStrategyBacktest()
 
   const [selectedId, setSelectedId] = useState<number | 'new'>('new')
+  const [selectedRunId, setSelectedRunId] = useState<number | null>(null)
   const [form, setForm] = useState<AdminStrategyPayload>(defaultPayload())
   const [backtestLookbackDays, setBacktestLookbackDays] = useState('365')
   const [backtestMargin, setBacktestMargin] = useState('100')
@@ -120,6 +142,18 @@ export default function AdminStrategies() {
   const selectedStrategy = useMemo(
     () => strategies.find((strategy) => strategy.id === selectedId) ?? null,
     [selectedId, strategies],
+  )
+  const { data: backtests = [], isLoading: backtestsLoading } = useStrategyBacktests(
+    selectedStrategy?.id ?? null,
+  )
+
+  useEffect(() => {
+    setSelectedRunId(backtests[0]?.id ?? null)
+  }, [selectedStrategy?.id, backtests])
+
+  const selectedBacktest = useMemo(
+    () => backtests.find((run) => run.id === selectedRunId) ?? backtests[0] ?? null,
+    [backtests, selectedRunId],
   )
 
   const loadStrategy = (strategy: Strategy | null) => {
@@ -174,13 +208,18 @@ export default function AdminStrategies() {
   }
 
   const triggerBacktest = (strategyId: number) => {
-    runBacktest.mutate({
-      strategyId,
-      payload: {
-        lookback_days: Number(backtestLookbackDays),
-        margin_per_trade: Number(backtestMargin),
+    runBacktest.mutate(
+      {
+        strategyId,
+        payload: {
+          lookback_days: Number(backtestLookbackDays),
+          margin_per_trade: Number(backtestMargin),
+        },
       },
-    })
+      {
+        onSuccess: (run) => setSelectedRunId(run.id),
+      },
+    )
   }
 
   return (
@@ -195,12 +234,12 @@ export default function AdminStrategies() {
             Admin Strategy Lab
           </div>
           <div className="text-muted-foreground text-xs mt-1">
-            Configure live strategies and publish historical backtest snapshots for users.
+            Manage strategy parameters, run historical simulations, and inspect each simulated order.
           </div>
         </div>
       </div>
 
-      <div className="px-5 grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+      <div className="px-5 grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <div className="space-y-3">
           <Button variant="outline" className="w-full justify-center gap-2" onClick={() => loadStrategy(null)}>
             <Plus size={16} />
@@ -230,12 +269,12 @@ export default function AdminStrategies() {
                 <div className="text-muted-foreground text-xs mt-2">
                   {(strategy.symbols ?? []).join(', ')}
                 </div>
-                {strategy.backtest_summary && (
+                {strategy.latest_backtest && (
                   <div className="text-muted-foreground text-xs mt-2">
-                    {strategy.backtest_summary.total_trades} trades •{' '}
-                    {strategy.backtest_summary.win_rate.toFixed(2)}% win •{' '}
-                    {strategy.backtest_summary.net_profit_usd >= 0 ? '+' : ''}
-                    {strategy.backtest_summary.net_profit_usd.toFixed(2)} USDT
+                    {strategy.latest_backtest.total_trades} trades •{' '}
+                    {strategy.latest_backtest.win_rate.toFixed(2)}% win •{' '}
+                    {strategy.latest_backtest.net_profit_usd >= 0 ? '+' : ''}
+                    {strategy.latest_backtest.net_profit_usd.toFixed(2)} USDT
                   </div>
                 )}
               </Card>
@@ -251,7 +290,7 @@ export default function AdminStrategies() {
                   {selectedId === 'new' ? 'Create Strategy' : 'Edit Strategy'}
                 </div>
                 <div className="text-muted-foreground text-xs mt-1">
-                  Admins can tune supported parameters; execution logic stays in Python.
+                  Parameter tuning lives here; execution logic remains in Python strategy adapters.
                 </div>
               </div>
               {selectedStrategy && (
@@ -376,7 +415,12 @@ export default function AdminStrategies() {
               <Card className="p-5">
                 <div className="flex items-center gap-2 mb-4">
                   <FlaskConical size={18} className="text-[#a78bfa]" />
-                  <div className="text-foreground font-semibold">Run Backtest</div>
+                  <div>
+                    <div className="text-foreground font-semibold">Run Backtest</div>
+                    <div className="text-muted-foreground text-xs mt-1">
+                      Each run is saved separately with its own statistics and simulated orders.
+                    </div>
+                  </div>
                 </div>
                 <div className="grid gap-4 md:grid-cols-2">
                   <div>
@@ -410,13 +454,124 @@ export default function AdminStrategies() {
                   disabled={runBacktest.isPending}
                 >
                   <BarChart3 size={16} />
-                  {runBacktest.isPending ? 'Running Backtest…' : 'Run and Publish Backtest'}
+                  {runBacktest.isPending ? 'Running Backtest…' : 'Run and Save Backtest'}
                 </Button>
               </Card>
 
-              {selectedStrategy.backtest_summary && (
-                <BacktestCard summary={selectedStrategy.backtest_summary} />
+              {selectedStrategy.latest_backtest && (
+                <SummaryCard title="Latest Published Snapshot" summary={selectedStrategy.latest_backtest} />
               )}
+
+              <Card className="p-5">
+                <div className="text-foreground font-semibold mb-3">Backtest History</div>
+                {backtestsLoading ? (
+                  <div className="text-muted-foreground text-sm">Loading backtests…</div>
+                ) : backtests.length === 0 ? (
+                  <div className="text-muted-foreground text-sm">
+                    No backtests yet. Run one to generate statistics and order history.
+                  </div>
+                ) : (
+                  <div className="grid gap-3 lg:grid-cols-[280px_minmax(0,1fr)]">
+                    <div className="space-y-2">
+                      {backtests.map((run) => (
+                        <button
+                          key={run.id}
+                          type="button"
+                          onClick={() => setSelectedRunId(run.id)}
+                          className={`w-full text-left p-3 rounded-xl border transition-colors ${
+                            selectedBacktest?.id === run.id
+                              ? 'border-[#6c47ff] bg-input'
+                              : 'border-border hover:border-[#333]'
+                          }`}
+                        >
+                          <div className="flex justify-between gap-3 items-start">
+                            <div>
+                              <div className="text-foreground text-sm font-semibold">
+                                Run #{run.id}
+                              </div>
+                              <div className="text-muted-foreground text-xs mt-1">
+                                {new Date(run.generated_at).toLocaleString()}
+                              </div>
+                            </div>
+                            <Badge variant={run.net_profit_usd >= 0 ? 'success' : 'destructive'}>
+                              {run.net_profit_usd >= 0 ? '+' : ''}
+                              {run.net_profit_usd.toFixed(2)}
+                            </Badge>
+                          </div>
+                          <div className="text-muted-foreground text-xs mt-2">
+                            {run.total_trades} trades • {run.win_rate.toFixed(2)}% win • DD{' '}
+                            {run.max_drawdown_usd.toFixed(2)}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+
+                    {selectedBacktest && (
+                      <div className="space-y-4">
+                        <SummaryCard title={`Backtest Run #${selectedBacktest.id}`} summary={selectedBacktest} />
+
+                        <Card className="p-4 bg-input border-border">
+                          <div className="text-foreground font-semibold text-sm mb-3">Per-Symbol Results</div>
+                          <div className="space-y-2">
+                            {selectedBacktest.symbol_results.map((result) => (
+                              <div
+                                key={result.symbol}
+                                className="flex items-center justify-between text-xs border-b border-border pb-2 last:border-b-0"
+                              >
+                                <div className="text-foreground font-medium">{result.symbol}</div>
+                                <div className="text-muted-foreground">
+                                  {result.total_trades} trades • {result.win_rate.toFixed(2)}% •{' '}
+                                  {result.net_profit_usd >= 0 ? '+' : ''}
+                                  {result.net_profit_usd.toFixed(2)} USDT
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </Card>
+
+                        <Card className="p-4 bg-input border-border">
+                          <div className="text-foreground font-semibold text-sm mb-3">Assumptions</div>
+                          <div className="text-muted-foreground text-xs space-y-1">
+                            {selectedBacktest.assumption_notes.map((note) => (
+                              <div key={note}>• {note}</div>
+                            ))}
+                          </div>
+                        </Card>
+
+                        <Card className="p-4 bg-input border-border">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="text-foreground font-semibold text-sm">Simulated Orders</div>
+                            <div className="text-muted-foreground text-xs">
+                              {selectedBacktest.orders.length} closed orders
+                            </div>
+                          </div>
+                          {selectedBacktest.orders.length === 0 ? (
+                            <div className="text-muted-foreground text-sm">No orders were opened in this run.</div>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <div className="min-w-[880px]">
+                                <div className="grid grid-cols-[1.1fr_0.8fr_0.8fr_0.9fr_0.9fr_0.8fr_0.9fr_0.8fr] gap-3 text-[11px] uppercase tracking-wide text-muted-foreground pb-2 border-b border-border">
+                                  <div>Trade</div>
+                                  <div>Side</div>
+                                  <div>Status</div>
+                                  <div>Entry</div>
+                                  <div>Exit</div>
+                                  <div>Margin</div>
+                                  <div>PnL</div>
+                                  <div>Bars</div>
+                                </div>
+                                {selectedBacktest.orders.map((order, index) => (
+                                  <OrderRow key={`${order.symbol}-${order.closed_at}-${index}`} order={order} />
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </Card>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
             </>
           )}
         </div>
