@@ -35,6 +35,10 @@
   box-sizing: border-box;
 }
 
+html {
+  color-scheme: dark;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -42,13 +46,15 @@ body {
   color: var(--color-foreground);
 }
 
-/* Autofill override — CSS variables don't resolve in webkit-autofill context so use hardcoded values */
+/* Autofill override — belt-and-suspenders: color-scheme:dark is the primary fix,
+   box-shadow inset is the fallback for older Chromium versions */
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
 input:-webkit-autofill:active {
   -webkit-box-shadow: 0 0 0 1000px #141414 inset !important;
+  box-shadow: 0 0 0 1000px #141414 inset !important;
   -webkit-text-fill-color: #f9f9f9 !important;
   caret-color: #f9f9f9;
-  transition: background-color 5000s ease-in-out 0s;
+  transition: background-color 0s 600000s, color 0s 600000s !important;
 }

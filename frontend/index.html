@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/brand/favicon-16.png" />
@@ -11,6 +12,17 @@
     <style>
       /* FOUC prevention only — no padding/margin reset here (would override @layer utilities) */
       body { background: #0a0a0a; color: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+      /* Autofill: inline style is guaranteed unlayered — overrides any @layer processed CSS */
+      input:-webkit-autofill,
+      input:-webkit-autofill:hover,
+      input:-webkit-autofill:focus,
+      input:-webkit-autofill:active {
+        -webkit-box-shadow: 0 0 0 1000px #141414 inset !important;
+        box-shadow: 0 0 0 1000px #141414 inset !important;
+        -webkit-text-fill-color: #f9f9f9 !important;
+        caret-color: #f9f9f9;
+        transition: background-color 0s 600000s, color 0s 600000s !important;
+      }
     </style>
   </head>
   <body>
