@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 
 import Layout from './components/Layout'
 import AdminStrategies from './pages/AdminStrategies'
+import AdminStrategyDetail from './pages/AdminStrategyDetail'
 import Exchanges from './pages/Exchanges'
 import Home from './pages/Home'
 import Login from './pages/Login'
@@ -108,6 +109,18 @@ export default function App() {
             <AdminRoute>
               <Layout>
                 <AdminStrategies />
+              </Layout>
+            </AdminRoute>
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/admin/strategies/:id"
+        element={
+          <PrivateRoute>
+            <AdminRoute>
+              <Layout>
+                <AdminStrategyDetail />
               </Layout>
             </AdminRoute>
           </PrivateRoute>

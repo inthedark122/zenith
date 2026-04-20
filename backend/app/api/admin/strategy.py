@@ -2,6 +2,7 @@ from typing import List
 
 import ccxt
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.deps import get_current_admin, get_db
@@ -139,3 +140,36 @@ def run_backtest(
     db.commit()
     db.refresh(backtest_run)
     return backtest_run
+
+
+class BacktestPublishPayload(BaseModel):
+    is_public: bool
+
+
+@router.patch(
+    "/strategies/{strategy_id}/backtests/{backtest_id}",
+    response_model=StrategyBacktestRunResponse,
+)
+def patch_backtest(
+    strategy_id: int,
+    backtest_id: int,
+    payload: BacktestPublishPayload,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
+):
+    """Toggle is_public (or any future patch field) on a specific backtest run."""
+    run = (
+        db.query(StrategyBacktestRun)
+        .options(selectinload(StrategyBacktestRun.strategy_template))
+        .filter(
+            StrategyBacktestRun.id == backtest_id,
+            StrategyBacktestRun.strategy_id == strategy_id,
+        )
+        .first()
+    )
+    if run is None:
+        raise HTTPException(status_code=404, detail="Backtest run not found")
+    run.is_public = payload.is_public
+    db.commit()
+    db.refresh(run)
+    return run

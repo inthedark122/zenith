@@ -74,3 +74,23 @@ export function useRunStrategyBacktest() {
     },
   })
 }
+
+export function usePublishBacktest() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      strategyId,
+      backtestId,
+      isPublic,
+    }: {
+      strategyId: number
+      backtestId: number
+      isPublic: boolean
+    }) => adminApi.publishBacktest(strategyId, backtestId, isPublic),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'strategy-backtests', variables.strategyId] })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'strategies'] })
+      queryClient.invalidateQueries({ queryKey: ['strategies'] })
+    },
+  })
+}

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, Integer, JSON, String
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
@@ -11,6 +11,7 @@ class StrategyBacktestRun(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     strategy_id = Column(Integer, ForeignKey("strategies.id"), nullable=False, index=True)
+    is_public = Column(Boolean, nullable=False, default=False, server_default="false")
     timeframe = Column(String, nullable=False, default="1d")
     lookback_days = Column(Integer, nullable=False)
     margin_per_trade = Column(Float, nullable=False)

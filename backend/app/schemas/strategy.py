@@ -111,6 +111,7 @@ class StrategyBacktestSummary(BaseModel):
     best_trade_usd: Optional[float] = None
     worst_trade_usd: Optional[float] = None
     symbol_results: List[StrategyBacktestSymbolSummary]
+    is_public: bool = False
 
     model_config = {"from_attributes": True}
 

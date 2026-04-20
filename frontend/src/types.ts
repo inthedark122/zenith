@@ -86,6 +86,7 @@ export interface StrategyBacktestSummary {
   best_trade_usd?: number | null
   worst_trade_usd?: number | null
   symbol_results: StrategyBacktestSymbolSummary[]
+  is_public: boolean
 }
 
 export interface StrategyBacktestOrder {

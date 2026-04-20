@@ -14,4 +14,6 @@ export const adminApi = {
     client.delete(`/admin/strategies/${strategyId}`).then(() => undefined),
   runBacktest: (strategyId: number, payload: StrategyBacktestPayload): Promise<StrategyBacktestRun> =>
     client.post<StrategyBacktestRun>(`/admin/strategies/${strategyId}/backtest`, payload).then((r) => r.data),
+  publishBacktest: (strategyId: number, backtestId: number, isPublic: boolean): Promise<StrategyBacktestRun> =>
+    client.patch<StrategyBacktestRun>(`/admin/strategies/${strategyId}/backtests/${backtestId}`, { is_public: isPublic }).then((r) => r.data),
 }
