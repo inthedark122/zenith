@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 import ccxt
 
 from app.models.strategy import STRATEGY_DCA_MACD_DAILY, Strategy
+from app.services.exchange_factory import create_exchange
 from app.strategies.dca_macd_daily.strategy import (
     calculate_stop_loss,
     calculate_take_profit,
@@ -55,8 +56,8 @@ def _finalize_trade(
         "symbol": open_trade.symbol,
         "side": "long",
         "status": status,
-        "opened_at": open_trade.opened_at,
-        "closed_at": closed_at,
+        "opened_at": open_trade.opened_at.isoformat(),
+        "closed_at": closed_at.isoformat(),
         "entry_price": round(open_trade.entry_price, 8),
         "exit_price": round(close_price, 8),
         "take_profit_price": round(open_trade.take_profit_price, 8),
@@ -148,7 +149,7 @@ def run_strategy_backtest(
     if strategy.strategy != STRATEGY_DCA_MACD_DAILY:
         raise ValueError(f"Backtesting is not implemented for strategy '{strategy.strategy}'")
 
-    exchange = ccxt.okx({"enableRateLimit": True})
+    exchange = create_exchange("okx")
     limit = min(max(lookback_days + 60, 120), 1000)
     leverage = float(strategy.leverage)
     all_orders: List[Dict[str, Any]] = []

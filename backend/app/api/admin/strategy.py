@@ -18,6 +18,7 @@ from app.schemas.strategy import (
     StrategyUpdate,
 )
 from app.services.backtesting import run_strategy_backtest
+from app.services.exchange_factory import SUPPORTED_EXCHANGES, create_exchange
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -184,12 +185,6 @@ def patch_backtest(
 _symbols_cache: Dict[Tuple[str, str], Tuple[List[str], float]] = {}
 _SYMBOLS_TTL = 600  # 10 minutes
 
-SUPPORTED_EXCHANGES_MAP = {
-    "okx": ccxt.okx,
-    "binance": ccxt.binance,
-    "bybit": ccxt.bybit,
-}
-
 
 @router.get("/symbols", response_model=List[str])
 def list_symbols(
@@ -211,14 +206,14 @@ def list_symbols(
         if time.time() - fetched_at < _SYMBOLS_TTL:
             return cached_symbols
 
-    if exchange_id not in SUPPORTED_EXCHANGES_MAP:
+    if exchange_id not in SUPPORTED_EXCHANGES:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported exchange '{exchange_id}'. Supported: {list(SUPPORTED_EXCHANGES_MAP)}",
+            detail=f"Unsupported exchange '{exchange_id}'. Supported: {list(SUPPORTED_EXCHANGES)}",
         )
 
     try:
-        ex = SUPPORTED_EXCHANGES_MAP[exchange_id]({"enableRateLimit": True})
+        ex = create_exchange(exchange_id)
         markets = ex.load_markets()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to load markets from {exchange_id}: {exc}")
@@ -234,3 +229,4 @@ def list_symbols(
 
     _symbols_cache[cache_key] = (symbols, time.time())
     return symbols
+
