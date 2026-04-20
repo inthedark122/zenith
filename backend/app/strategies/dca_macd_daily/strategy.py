@@ -4,17 +4,18 @@ MACD D1 (Daily) trading strategy implementation.
 Strategy rules:
   - Supported symbols : BTC/USDT, ETH/USDT, HYPE/USDT
   - Timeframe         : D1 for entry signal; 15m for recovery (2nd entry)
-  - Direction         : LONG only, following the D1 trend
-  - Entry signal      : D1 MACD bullish crossover (MACD line crosses above signal line)
+  - Direction         : LONG on bullish D1 MACD crossover,
+                        SHORT on bearish D1 MACD crossover
+  - Entry signal      : D1 MACD crossover detected at candle close;
+                        entered at the OPEN of the following candle
   - Risk / Reward     : 1 : 2  (risk 100 % of margin, target 200 %)
-  - Stop loss         : 100 % of margin (full margin loss)
-  - Take profit       : 2 × risk amount from entry
+  - Stop loss         : entry moves against by (1 / leverage)  → −100 % margin
+  - Take profit       : entry moves in favour by (rr_ratio / leverage) → +200 % margin
   - Daily limits      :
-      * Entry #1 — based on D1 MACD cross
-      * If entry #1 is a WIN  → 1 more trade allowed that day
-      * If entry #1 is a LOSS → 1 more trade allowed (recovery on 15 m correction)
-      * After entry #2 (win or loss) → no more trades that day
-  - Max daily margin  : 2 × margin_per_trade (e.g. $10 × 2 = $20)
+      * Max 2 trades per symbol per calendar day
+      * After 2 entries (any combination of win/loss) → no more trades that day
+      * Released margin (closed trade) may be re-deployed on the 2nd entry
+  - Max daily margin  : 2 × margin_per_trade per symbol
 """
 
 import threading
@@ -123,33 +124,42 @@ def calculate_take_profit(
     margin: float,
     leverage: float,
     rr_ratio: float = 2.0,
+    side: str = "long",
 ) -> float:
     """
-    Return the take-profit price for a LONG position.
+    Return the take-profit price.
 
     Position size = margin × leverage
     Target profit = margin × rr_ratio
-    TP price      = entry_price + (target_profit / position_size) × entry_price
+    Price move    = target_profit / position_size = rr_ratio / leverage
+
+    LONG : TP = entry × (1 + rr_ratio / leverage)
+    SHORT: TP = entry × (1 − rr_ratio / leverage)
     """
-    position_size = margin * leverage
-    target_profit = margin * rr_ratio
-    price_move_pct = target_profit / position_size
-    return round(entry_price * (1 + price_move_pct), 8)
+    move_pct = rr_ratio / leverage
+    if side == "long":
+        return round(entry_price * (1 + move_pct), 8)
+    return round(entry_price * (1 - move_pct), 8)
 
 
 def calculate_stop_loss(
     entry_price: float,
     margin: float,
     leverage: float,
+    side: str = "long",
 ) -> float:
     """
-    Return the stop-loss price for a LONG position.
+    Return the stop-loss price.
 
-    Stop loss = 100 % of margin → price must drop by (1 / leverage) from entry.
-    SL price  = entry_price × (1 − 1/leverage)
+    Stop loss = 100 % of margin → price moves against by (1 / leverage).
+
+    LONG : SL = entry × (1 − 1 / leverage)
+    SHORT: SL = entry × (1 + 1 / leverage)
     """
     sl_pct = 1.0 / leverage
-    return round(entry_price * (1 - sl_pct), 8)
+    if side == "long":
+        return round(entry_price * (1 - sl_pct), 8)
+    return round(entry_price * (1 + sl_pct), 8)
 
 
 # ---------------------------------------------------------------------------
