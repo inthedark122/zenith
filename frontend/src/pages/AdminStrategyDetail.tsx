@@ -14,6 +14,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 
 import {
   useAdminStrategies,
+  useBacktestCandles,
   useDeleteAdminStrategy,
   usePublishBacktest,
   useRunStrategyBacktest,
@@ -27,6 +28,7 @@ import {
   StrategyBacktestSummary,
 } from '../types'
 import { Badge } from '@/components/ui/badge'
+import { BacktestChart } from '@/components/ui/backtest-chart'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -171,6 +173,7 @@ export default function AdminStrategyDetail() {
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null)
   const [backtestDays, setBacktestDays] = useState('365')
   const [backtestMargin, setBacktestMargin] = useState('100')
+  const [chartSymbol, setChartSymbol] = useState<string | null>(null)
 
   useEffect(() => {
     if (strategy) {
@@ -198,6 +201,19 @@ export default function AdminStrategyDetail() {
   const selectedRun = useMemo(
     () => backtests.find((r) => r.id === selectedRunId) ?? backtests[0] ?? null,
     [backtests, selectedRunId],
+  )
+
+  // Auto-select first symbol for chart when run changes
+  useEffect(() => {
+    if (selectedRun) {
+      const firstSymbol = selectedRun.symbol_results[0]?.symbol ?? selectedRun.orders[0]?.symbol ?? null
+      setChartSymbol(firstSymbol)
+    }
+  }, [selectedRun?.id])
+
+  const { data: chartCandles = [], isFetching: chartLoading } = useBacktestCandles(
+    selectedRun?.id ?? null,
+    chartSymbol,
   )
 
   const dashboardBacktest = strategy?.latest_backtest ?? backtests[0] ?? null
@@ -535,6 +551,55 @@ export default function AdminStrategyDetail() {
                         </Button>
                       }
                     />
+
+                    {/* KLine chart */}
+                    {chartSymbol !== null && (
+                      <Card className="p-4">
+                        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+                          <div className="text-foreground font-semibold text-sm flex items-center gap-2">
+                            <BarChart3 size={15} className="text-[#a78bfa]" />
+                            Chart
+                            {chartLoading && (
+                              <span className="text-muted-foreground text-[10px] font-normal">Loading…</span>
+                            )}
+                          </div>
+                          {selectedRun.symbol_results.length > 1 && (
+                            <div className="flex gap-1.5 flex-wrap">
+                              {selectedRun.symbol_results.map((sr) => (
+                                <button
+                                  key={sr.symbol}
+                                  onClick={() => setChartSymbol(sr.symbol)}
+                                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer border ${
+                                    chartSymbol === sr.symbol
+                                      ? 'border-[#6c47ff] bg-[#6c47ff]/20 text-foreground'
+                                      : 'border-border text-muted-foreground hover:text-foreground hover:border-[#333]'
+                                  }`}
+                                >
+                                  {sr.symbol}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        {!chartLoading && chartCandles.length > 0 ? (
+                          <BacktestChart
+                            candles={chartCandles}
+                            orders={selectedRun.orders}
+                            symbol={chartSymbol}
+                          />
+                        ) : !chartLoading ? (
+                          <p className="text-muted-foreground text-sm py-8 text-center">No candle data available.</p>
+                        ) : (
+                          <div className="h-[420px] rounded-lg bg-[#111] animate-pulse" />
+                        )}
+                        <div className="flex items-center gap-4 mt-3 text-[10px] text-muted-foreground">
+                          <span className="flex items-center gap-1.5"><span className="inline-block w-2 h-2 rounded-full bg-[#4ade80]" />BUY entry</span>
+                          <span className="flex items-center gap-1.5"><span className="inline-block w-4 h-px border-t border-dashed border-[#4ade80]" />TP level</span>
+                          <span className="flex items-center gap-1.5"><span className="inline-block w-4 h-px border-t border-dashed border-[#f87171]" />SL level</span>
+                          <span className="flex items-center gap-1.5"><span className="inline-block w-2 h-2 rounded-full bg-[#a78bfa]" />Exit (TP/SL/FC)</span>
+                        </div>
+                      </Card>
+                    )}
 
                     {selectedRun.symbol_results.length > 0 && (
                       <Card className="p-4">

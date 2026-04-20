@@ -1,4 +1,4 @@
-import { AdminStrategyPayload, Strategy, StrategyBacktestPayload, StrategyBacktestRun } from '../types'
+import { AdminStrategyPayload, OhlcvCandle, Strategy, StrategyBacktestPayload, StrategyBacktestRun } from '../types'
 import client from './client'
 
 export const adminApi = {
@@ -18,4 +18,6 @@ export const adminApi = {
     client.patch<StrategyBacktestRun>(`/admin/strategies/${strategyId}/backtests/${backtestId}`, { is_public: isPublic }).then((r) => r.data),
   getSymbols: (exchange = 'okx', marketType = 'spot'): Promise<string[]> =>
     client.get<string[]>('/admin/symbols', { params: { exchange, market_type: marketType } }).then((r) => r.data),
+  getBacktestCandles: (backtestId: number, symbol: string): Promise<OhlcvCandle[]> =>
+    client.get<OhlcvCandle[]>(`/admin/backtests/${backtestId}/candles`, { params: { symbol } }).then((r) => r.data),
 }

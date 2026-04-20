@@ -203,6 +203,15 @@ export interface StrategyBacktestPayload {
   margin_per_trade: number
 }
 
+export interface OhlcvCandle {
+  timestamp: number
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
 export interface CommunityMember {
   id: number
 }

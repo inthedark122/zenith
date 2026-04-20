@@ -178,6 +178,48 @@ def patch_backtest(
 
 
 # ---------------------------------------------------------------------------
+# Backtest OHLCV candles
+# ---------------------------------------------------------------------------
+
+
+class OhlcvCandle(BaseModel):
+    timestamp: int
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
+@router.get("/backtests/{backtest_id}/candles", response_model=List[OhlcvCandle])
+def get_backtest_candles(
+    backtest_id: int,
+    symbol: str = Query(..., description="Trading pair e.g. BTC/USDT"),
+    db: Session = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
+):
+    """Fetch daily OHLCV candles for the period covered by a backtest run."""
+    run = db.query(StrategyBacktestRun).filter(StrategyBacktestRun.id == backtest_id).first()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Backtest run not found")
+
+    exchange = create_exchange("okx")
+    limit = min(run.lookback_days + 120, 1000)
+    raw = exchange.fetch_ohlcv(symbol, timeframe="1d", limit=limit)
+    return [
+        OhlcvCandle(
+            timestamp=int(c[0]),
+            open=float(c[1]),
+            high=float(c[2]),
+            low=float(c[3]),
+            close=float(c[4]),
+            volume=float(c[5]),
+        )
+        for c in raw
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Symbol catalogue
 # ---------------------------------------------------------------------------
 
