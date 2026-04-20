@@ -125,17 +125,23 @@ def calculate_take_profit(
     leverage: float,
     rr_ratio: float = 2.0,
     side: str = "long",
+    spot_sl_pct: float = 0.05,
 ) -> float:
     """
     Return the take-profit price.
 
-    Position size = margin × leverage
-    Target profit = margin × rr_ratio
-    Price move    = target_profit / position_size = rr_ratio / leverage
+    Futures (leverage > 1):
+      Price move = rr_ratio / leverage
+      LONG : TP = entry × (1 + rr_ratio / leverage)
+      SHORT: TP = entry × (1 − rr_ratio / leverage)
 
-    LONG : TP = entry × (1 + rr_ratio / leverage)
-    SHORT: TP = entry × (1 − rr_ratio / leverage)
+    Spot (leverage = 1):
+      Uses a fixed risk % (spot_sl_pct, default 5%).
+      LONG : TP = entry × (1 + spot_sl_pct × rr_ratio)
+      (SHORT is not available on spot)
     """
+    if leverage <= 1.0:
+        return round(entry_price * (1 + spot_sl_pct * rr_ratio), 8)
     move_pct = rr_ratio / leverage
     if side == "long":
         return round(entry_price * (1 + move_pct), 8)
@@ -147,15 +153,23 @@ def calculate_stop_loss(
     margin: float,
     leverage: float,
     side: str = "long",
+    spot_sl_pct: float = 0.05,
 ) -> float:
     """
     Return the stop-loss price.
 
-    Stop loss = 100 % of margin → price moves against by (1 / leverage).
+    Futures (leverage > 1):
+      Price moves against by 1 / leverage (= 100% margin loss).
+      LONG : SL = entry × (1 − 1 / leverage)
+      SHORT: SL = entry × (1 + 1 / leverage)
 
-    LONG : SL = entry × (1 − 1 / leverage)
-    SHORT: SL = entry × (1 + 1 / leverage)
+    Spot (leverage = 1):
+      Uses a fixed risk % (spot_sl_pct, default 5%).
+      LONG : SL = entry × (1 − spot_sl_pct)
+      (SHORT is not available on spot)
     """
+    if leverage <= 1.0:
+        return round(entry_price * (1 - spot_sl_pct), 8)
     sl_pct = 1.0 / leverage
     if side == "long":
         return round(entry_price * (1 - sl_pct), 8)

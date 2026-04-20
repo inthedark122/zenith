@@ -278,7 +278,7 @@ export default function AdminStrategyDetail() {
             </Badge>
           </div>
           <div className="text-muted-foreground text-xs mt-1">
-            {strategy.strategy} · {strategy.symbols.join(', ')} · {strategy.leverage}× · R:R 1:{strategy.rr_ratio}
+            {strategy.strategy} · {strategy.symbols.join(', ')} · {strategy.leverage === 1 ? 'Spot' : `${strategy.leverage}× Futures`} · R:R 1:{strategy.rr_ratio}
           </div>
         </div>
       </div>
@@ -312,7 +312,7 @@ export default function AdminStrategyDetail() {
                 { label: 'Total Backtests', value: String(backtests.length) },
                 { label: 'Public Backtests', value: String(backtests.filter((r) => r.is_public).length) },
                 { label: 'Symbols', value: String(strategy.symbols.length) },
-                { label: 'Leverage', value: `${strategy.leverage}×` },
+                { label: 'Mode', value: strategy.leverage === 1 ? 'Spot' : `${strategy.leverage}× Futures` },
               ].map((m) => (
                 <Card key={m.label} className="p-4">
                   <Metric label={m.label} value={m.value} />
@@ -378,8 +378,8 @@ export default function AdminStrategyDetail() {
                 />
               </div>
               <div>
-                <Label>Leverage</Label>
-                <Input type="number" value={form.leverage} onChange={(e) => handleFieldChange('leverage', Number(e.target.value))} className="mt-1" />
+                <Label>Leverage <span className="text-muted-foreground font-normal">(1 = Spot, &gt;1 = Futures)</span></Label>
+                <Input type="number" min={1} value={form.leverage} onChange={(e) => handleFieldChange('leverage', Number(e.target.value))} className="mt-1" />
               </div>
               <div>
                 <Label>Risk : Reward</Label>

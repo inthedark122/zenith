@@ -14,15 +14,24 @@ from app.strategies.dca_macd_daily.strategy import (
     get_macd_signal,
 )
 
-_ASSUMPTION_NOTES = [
-    "Uses OKX daily OHLCV candles.",
-    "Bullish D1 MACD crossover → LONG; bearish crossover → SHORT.",
-    "Entry at the open of the candle following the crossover signal (realistic execution).",
-    "Stop loss = 100% of margin (price moves 1/leverage against entry).",
-    "Take profit = 200% of margin (1:2 RR; price moves rr_ratio/leverage in favour).",
-    "Maximum 2 trades per symbol per calendar day (daily margin cap).",
+_ASSUMPTION_NOTES_SPOT = [
+    "Uses OKX daily OHLCV candles — SPOT market (leverage = 1×).",
+    "Bullish D1 MACD crossover → LONG only (spot cannot short-sell).",
+    "Entry at the open of the candle following the crossover signal.",
+    "SL = 5% below entry; TP = 10% above entry (1:2 RR on price movement).",
+    "Maximum 2 trades per symbol per calendar day.",
     "If SL and TP are both touched within the same candle, SL wins (conservative).",
-    "15m recovery entry (2nd entry after a loss) is not modelled — uses next D1 signal instead.",
+    "Open trades still active at the end of the lookback window are closed at the last close.",
+]
+
+_ASSUMPTION_NOTES_FUTURES = [
+    "Uses OKX daily OHLCV candles — FUTURES market (leverage > 1×).",
+    "Bullish D1 MACD crossover → LONG; bearish crossover → SHORT.",
+    "Entry at the open of the candle following the crossover signal.",
+    "SL = 100% of margin; TP = 200% of margin (1:2 RR).",
+    "PnL = price_change% × leverage × margin (directional per side).",
+    "Maximum 2 trades per symbol per calendar day.",
+    "If SL and TP are both touched within the same candle, SL wins (conservative).",
     "Open trades still active at the end of the lookback window are closed at the last close.",
 ]
 
@@ -54,7 +63,9 @@ def _finalize_trade(
     leverage: float,
     bars_held: int,
 ) -> Dict[str, Any]:
-    # PnL direction depends on side
+    # Works for both spot (leverage=1) and futures (leverage>1).
+    # LONG PnL  = (close − entry) / entry × leverage × margin
+    # SHORT PnL = (entry − close) / entry × leverage × margin
     if open_trade.side == "long":
         pnl_usd = (close_price - open_trade.entry_price) / open_trade.entry_price * leverage * margin_per_trade
     else:
@@ -72,9 +83,9 @@ def _finalize_trade(
         "take_profit_price": round(open_trade.take_profit_price, 8),
         "stop_loss_price": round(open_trade.stop_loss_price, 8),
         "margin_per_trade": round(margin_per_trade, 2),
-        "leverage": round(leverage, 4),
+        "leverage": round(leverage, 1),
         "pnl_usd": _round(pnl_usd),
-        "pnl_pct": _round((pnl_usd / margin_per_trade) * 100),
+        "pnl_pct": _round(pnl_usd / margin_per_trade * 100),
         "close_reason": close_reason,
         "bars_held": bars_held,
     }
@@ -101,6 +112,7 @@ def _summarize_orders(
     margin_per_trade: float,
     period_start: Optional[datetime],
     period_end: Optional[datetime],
+    assumption_notes: List[str],
     symbol_results: List[Dict[str, Any]],
     orders: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
@@ -129,7 +141,7 @@ def _summarize_orders(
         "generated_at": datetime.now(tz=UTC).replace(tzinfo=None),
         "period_start": period_start.date() if period_start else None,
         "period_end": period_end.date() if period_end else None,
-        "assumption_notes": _ASSUMPTION_NOTES,
+        "assumption_notes": assumption_notes,
         "total_trades": len(orders),
         "wins": len(wins),
         "losses": len(losses),
@@ -162,6 +174,9 @@ def run_strategy_backtest(
     limit = min(max(lookback_days + 60, 120), 1000)
     leverage = float(strategy.leverage)
     rr_ratio = float(strategy.rr_ratio)
+    # leverage=1 → spot (LONG only); leverage>1 → futures (LONG + SHORT)
+    is_futures = leverage > 1.0
+    assumption_notes = _ASSUMPTION_NOTES_FUTURES if is_futures else _ASSUMPTION_NOTES_SPOT
     all_orders: List[Dict[str, Any]] = []
     symbol_results: List[Dict[str, Any]] = []
     overall_period_start: Optional[datetime] = None
@@ -176,9 +191,7 @@ def run_strategy_backtest(
         symbol_orders: List[Dict[str, Any]] = []
         closes: List[float] = []
         open_trade: Optional[_OpenTrade] = None
-        # "long" or "short" — queued to open at the next candle's open
         pending_entry: Optional[str] = None
-        # Tracks how many trades have been opened per calendar day for this symbol
         daily_trade_count: Dict[date, int] = {}
 
         symbol_period_start = datetime.fromtimestamp(candles[0][0] / 1000, tz=UTC)
@@ -219,7 +232,7 @@ def run_strategy_backtest(
                 if open_trade.side == "long":
                     hit_sl = low_price <= open_trade.stop_loss_price
                     hit_tp = high_price >= open_trade.take_profit_price
-                else:  # short
+                else:  # short (futures only)
                     hit_sl = high_price >= open_trade.stop_loss_price
                     hit_tp = low_price <= open_trade.take_profit_price
 
@@ -243,7 +256,6 @@ def run_strategy_backtest(
                     open_trade = None
 
             # ── Step 3: look for a new MACD signal ────────────────────────
-            # Skip if a trade is open or already pending, or no next candle
             if open_trade is not None or pending_entry is not None:
                 continue
             if index >= len(candles) - 1:
@@ -253,14 +265,14 @@ def run_strategy_backtest(
             if signal is None:
                 continue
 
-            # Check daily limit against the NEXT candle's date (trade opens there)
             next_date = datetime.fromtimestamp(candles[index + 1][0] / 1000, tz=UTC).date()
             if daily_trade_count.get(next_date, 0) >= 2:
                 continue
 
             if signal.is_bullish_crossover:
                 pending_entry = "long"
-            elif signal.is_bearish_crossover:
+            elif signal.is_bearish_crossover and is_futures:
+                # SHORT only available in futures mode
                 pending_entry = "short"
 
         # Force-close any trade still open at end of window
@@ -287,6 +299,7 @@ def run_strategy_backtest(
         margin_per_trade=margin_per_trade,
         period_start=overall_period_start,
         period_end=overall_period_end,
+        assumption_notes=assumption_notes,
         symbol_results=symbol_results,
         orders=all_orders,
     )
