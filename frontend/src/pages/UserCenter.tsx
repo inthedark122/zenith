@@ -7,6 +7,7 @@ import {
   Link2,
   LogOut,
   Megaphone,
+  Shield,
   User,
   Users,
   Wallet,
@@ -42,6 +43,9 @@ export default function UserCenter() {
   const { user, logout } = useAuthStore()
   const { data: mySubs = [] } = useMySubs()
   const activeSub = mySubs.find((s) => s.status === 'active') ?? null
+  const visibleMenuItems = user?.is_admin
+    ? [...menuItems, { icon: Shield, label: 'Admin Strategy Lab', path: '/admin/strategies' }]
+    : menuItems
 
   const copy = (text: string) => navigator.clipboard.writeText(text).catch(() => {})
 
@@ -100,7 +104,7 @@ export default function UserCenter() {
       </Card>
 
       <div className="mx-5">
-        {menuItems.map((item) => {
+        {visibleMenuItems.map((item) => {
           const Icon = item.icon
           return (
             <Card

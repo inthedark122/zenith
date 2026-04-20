@@ -126,6 +126,51 @@ function StrategyCard({
         </p>
       </div>
 
+      {strategy.backtest_summary && (
+        <Card className="p-3.5 mb-4 bg-input border-border">
+          <div className="flex justify-between items-start gap-3 mb-2">
+            <div>
+              <div className="text-foreground font-semibold text-sm">Historical Backtest</div>
+              <div className="text-muted-foreground text-xs mt-1">
+                {strategy.backtest_summary.period_start} → {strategy.backtest_summary.period_end}
+              </div>
+            </div>
+            <Badge
+              variant={strategy.backtest_summary.net_profit_usd >= 0 ? 'success' : 'destructive'}
+            >
+              {strategy.backtest_summary.net_profit_usd >= 0 ? '+' : ''}
+              {strategy.backtest_summary.net_profit_usd.toFixed(2)} USDT
+            </Badge>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs mb-2">
+            <div>
+              <div className="text-muted-foreground">Trades</div>
+              <div className="text-foreground font-semibold">
+                {strategy.backtest_summary.total_trades}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Win rate</div>
+              <div className="text-foreground font-semibold">
+                {strategy.backtest_summary.win_rate.toFixed(2)}%
+              </div>
+            </div>
+          </div>
+          <div className="text-muted-foreground text-[11px] mb-2">
+            Backtest uses {strategy.backtest_summary.lookback_days} daily candles with $
+            {strategy.backtest_summary.margin_per_trade}/trade.
+          </div>
+          {strategy.backtest_summary.symbol_results.slice(0, 3).map((result) => (
+            <div key={result.symbol} className="flex justify-between text-xs mb-1">
+              <span className="text-foreground">{result.symbol}</span>
+              <span className="text-muted-foreground">
+                {result.total_trades} trades • {result.win_rate.toFixed(2)}%
+              </span>
+            </div>
+          ))}
+        </Card>
+      )}
+
       {signal && (
         <Card className="p-3.5 mb-4 bg-input border-border">
           {signalMetrics.map(({ label, value }) => (

@@ -1,19 +1,21 @@
-"""
-Admin API — strategy management.
-
-Only users with ``is_admin=True`` can access these endpoints.
-Admins create and manage predefined Strategy templates that users
-activate by starting a StrategyWorker via POST /trading/launch.
-"""
+"""Admin API — strategy management and backtesting."""
+from datetime import datetime
 from typing import List
 
+import ccxt
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_admin, get_db
 from app.models.strategy import Strategy
 from app.models.user import User
-from app.schemas.strategy import StrategyCreate, StrategyResponse, StrategyUpdate
+from app.schemas.strategy import (
+    StrategyBacktestRequest,
+    StrategyCreate,
+    StrategyResponse,
+    StrategyUpdate,
+)
+from app.services.backtesting import run_strategy_backtest
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -73,3 +75,34 @@ def delete_strategy(
         raise HTTPException(status_code=404, detail="Strategy not found")
     db.delete(strategy)
     db.commit()
+
+
+@router.post("/strategies/{strategy_id}/backtest", response_model=StrategyResponse)
+def run_backtest(
+    strategy_id: int,
+    payload: StrategyBacktestRequest,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
+):
+    strategy = db.query(Strategy).filter(Strategy.id == strategy_id).first()
+    if strategy is None:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    try:
+        strategy.backtest_summary = run_strategy_backtest(
+            strategy,
+            lookback_days=payload.lookback_days,
+            margin_per_trade=payload.margin_per_trade,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except ccxt.BaseError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Backtest failed: {exc}",
+        )
+
+    strategy.backtest_updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(strategy)
+    return strategy

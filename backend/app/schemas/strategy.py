@@ -57,6 +57,51 @@ class StrategyUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+class StrategyBacktestRequest(BaseModel):
+    lookback_days: int = 365
+    margin_per_trade: float = 100.0
+
+    @field_validator("lookback_days")
+    @classmethod
+    def validate_lookback_days(cls, v: int) -> int:
+        if v < 60 or v > 1000:
+            raise ValueError("lookback_days must be between 60 and 1000")
+        return v
+
+    @field_validator("margin_per_trade")
+    @classmethod
+    def validate_margin_per_trade(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("margin_per_trade must be positive")
+        return v
+
+
+class StrategyBacktestSymbolSummary(BaseModel):
+    symbol: str
+    total_trades: int
+    wins: int
+    losses: int
+    win_rate: float
+    net_profit_usd: float
+
+
+class StrategyBacktestSummary(BaseModel):
+    strategy: str
+    timeframe: str
+    lookback_days: int
+    margin_per_trade: float
+    generated_at: datetime
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
+    assumption_notes: List[str]
+    total_trades: int
+    wins: int
+    losses: int
+    win_rate: float
+    net_profit_usd: float
+    symbol_results: List[StrategyBacktestSymbolSummary]
+
+
 class StrategyResponse(BaseModel):
     id: int
     name: str
@@ -65,6 +110,8 @@ class StrategyResponse(BaseModel):
     leverage: float
     rr_ratio: float
     settings: Dict[str, Any]
+    backtest_summary: Optional[StrategyBacktestSummary] = None
+    backtest_updated_at: Optional[datetime] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime

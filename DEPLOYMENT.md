@@ -103,6 +103,7 @@ Set variables directly in the Railway dashboard under each service's **Variables
 | `SECRET_KEY` | A long random string (≥ 32 characters) — generate one at [randomkeygen.com](https://randomkeygen.com) |
 | `ALGORITHM` | `HS256` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` |
+| `ADMIN_EMAIL` | Optional operator email that should receive admin access automatically |
 | `EVM_PAYMENTS_ENABLED` | `false` |
 | `MARKET_POLL_INTERVAL` | `60` |
 
@@ -229,6 +230,7 @@ Railway → Service → Deployments → Redeploy
 | `SECRET_KEY` | ✅ | — | JWT signing secret |
 | `ALGORITHM` | | `HS256` | JWT algorithm |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | | `30` | JWT TTL in minutes |
+| `ADMIN_EMAIL` | | — | If set, matching users are promoted to `is_admin=true` automatically |
 | `EVM_PAYMENTS_ENABLED` | | `false` | Enables the legacy ERC-20 deposit flow when set to `true` |
 | `MARKET_POLL_INTERVAL` | | `60` | Seconds between market data polls |
 | `PORT` | | *(unused by frontend)* | Frontend nginx listens on port `80` |
@@ -269,6 +271,12 @@ Railway → Service → Deployments → Redeploy
 
 - `EVM_PAYMENTS_ENABLED=false` disables the legacy ERC-20 deposit flow and stops the blockchain listener.
 - Wallet deposit address and on-chain transaction submission endpoints return a temporary unavailable response while the third-party payment provider is being integrated.
+
+### Admin page is not visible
+
+- Set `ADMIN_EMAIL` on the **BackEnd** service to the operator email that should manage strategies.
+- A newly registered user with that email becomes admin immediately.
+- If the user already exists, the backend promotes that account on startup.
 
 ### Wrong project or branch deploys
 

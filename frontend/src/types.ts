@@ -3,6 +3,7 @@ export interface User {
   email: string
   username: string
   referral_code: string
+  is_admin: boolean
 }
 
 export interface AuthResponse {
@@ -49,6 +50,32 @@ export interface StrategySettings {
   max_daily_trades?: number
 }
 
+export interface StrategyBacktestSymbolSummary {
+  symbol: string
+  total_trades: number
+  wins: number
+  losses: number
+  win_rate: number
+  net_profit_usd: number
+}
+
+export interface StrategyBacktestSummary {
+  strategy: string
+  timeframe: string
+  lookback_days: number
+  margin_per_trade: number
+  generated_at: string
+  period_start?: string
+  period_end?: string
+  assumption_notes: string[]
+  total_trades: number
+  wins: number
+  losses: number
+  win_rate: number
+  net_profit_usd: number
+  symbol_results: StrategyBacktestSymbolSummary[]
+}
+
 export interface Strategy {
   id: number
   name: string
@@ -57,6 +84,11 @@ export interface Strategy {
   rr_ratio: number
   symbols: string[]
   settings?: StrategySettings
+  backtest_summary?: StrategyBacktestSummary | null
+  backtest_updated_at?: string | null
+  is_active?: boolean
+  created_at?: string
+  updated_at?: string
 }
 
 export interface Signal {
@@ -120,6 +152,21 @@ export interface Subscription {
 export interface SubscribePayload {
   plan: string
   coins: string[]
+}
+
+export interface AdminStrategyPayload {
+  name: string
+  strategy: string
+  symbols: string[]
+  leverage: number
+  rr_ratio: number
+  settings: StrategySettings
+  is_active: boolean
+}
+
+export interface StrategyBacktestPayload {
+  lookback_days: number
+  margin_per_trade: number
 }
 
 export interface CommunityMember {
