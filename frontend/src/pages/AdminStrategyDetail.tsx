@@ -14,7 +14,6 @@ import { useNavigate, useParams } from 'react-router-dom'
 
 import {
   useAdminStrategies,
-  useBacktestCandles,
   useDeleteAdminStrategy,
   usePublishBacktest,
   useRunStrategyBacktest,
@@ -210,11 +209,6 @@ export default function AdminStrategyDetail() {
       setChartSymbol(firstSymbol)
     }
   }, [selectedRun?.id])
-
-  const { data: chartCandles = [], isFetching: chartLoading } = useBacktestCandles(
-    selectedRun?.id ?? null,
-    chartSymbol,
-  )
 
   const dashboardBacktest = strategy?.latest_backtest ?? backtests[0] ?? null
 
@@ -559,9 +553,6 @@ export default function AdminStrategyDetail() {
                           <div className="text-foreground font-semibold text-sm flex items-center gap-2">
                             <BarChart3 size={15} className="text-[#a78bfa]" />
                             Chart
-                            {chartLoading && (
-                              <span className="text-muted-foreground text-[10px] font-normal">Loading…</span>
-                            )}
                           </div>
                           {selectedRun.symbol_results.length > 1 && (
                             <div className="flex gap-1.5 flex-wrap">
@@ -581,23 +572,11 @@ export default function AdminStrategyDetail() {
                             </div>
                           )}
                         </div>
-                        {!chartLoading && chartCandles.length > 0 ? (
-                          <BacktestChart
-                            candles={chartCandles}
-                            orders={selectedRun.orders}
-                            symbol={chartSymbol}
-                          />
-                        ) : !chartLoading ? (
-                          <p className="text-muted-foreground text-sm py-8 text-center">No candle data available.</p>
-                        ) : (
-                          <div className="h-[420px] rounded-lg bg-[#111] animate-pulse" />
-                        )}
-                        <div className="flex items-center gap-4 mt-3 text-[10px] text-muted-foreground">
-                          <span className="flex items-center gap-1.5"><span className="inline-block w-2 h-2 rounded-full bg-[#4ade80]" />BUY entry</span>
-                          <span className="flex items-center gap-1.5"><span className="inline-block w-4 h-px border-t border-dashed border-[#4ade80]" />TP level</span>
-                          <span className="flex items-center gap-1.5"><span className="inline-block w-4 h-px border-t border-dashed border-[#f87171]" />SL level</span>
-                          <span className="flex items-center gap-1.5"><span className="inline-block w-2 h-2 rounded-full bg-[#a78bfa]" />Exit (TP/SL/FC)</span>
-                        </div>
+                        <BacktestChart
+                          backtestId={selectedRun.id}
+                          orders={selectedRun.orders}
+                          symbol={chartSymbol}
+                        />
                       </Card>
                     )}
 

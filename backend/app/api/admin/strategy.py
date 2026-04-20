@@ -191,21 +191,36 @@ class OhlcvCandle(BaseModel):
     volume: float
 
 
+_TIMEFRAME_MULTIPLIERS: Dict[str, int] = {
+    "1d": 1,
+    "4h": 6,
+    "1h": 24,
+    "30m": 48,
+    "15m": 96,
+}
+_VALID_TIMEFRAMES = set(_TIMEFRAME_MULTIPLIERS)
+
+
 @router.get("/backtests/{backtest_id}/candles", response_model=List[OhlcvCandle])
 def get_backtest_candles(
     backtest_id: int,
     symbol: str = Query(..., description="Trading pair e.g. BTC/USDT"),
+    timeframe: str = Query(default="1d", description="OHLCV timeframe: 1d, 4h, 1h, 30m, 15m"),
     db: Session = Depends(get_db),
     _admin: User = Depends(get_current_admin),
 ):
-    """Fetch daily OHLCV candles for the period covered by a backtest run."""
+    """Fetch OHLCV candles for the period covered by a backtest run."""
+    if timeframe not in _VALID_TIMEFRAMES:
+        raise HTTPException(status_code=400, detail=f"Unsupported timeframe. Use one of: {sorted(_VALID_TIMEFRAMES)}")
+
     run = db.query(StrategyBacktestRun).filter(StrategyBacktestRun.id == backtest_id).first()
     if run is None:
         raise HTTPException(status_code=404, detail="Backtest run not found")
 
     exchange = create_exchange("okx")
-    limit = min(run.lookback_days + 120, 1000)
-    raw = exchange.fetch_ohlcv(symbol, timeframe="1d", limit=limit)
+    multiplier = _TIMEFRAME_MULTIPLIERS[timeframe]
+    limit = min((run.lookback_days + 30) * multiplier, 1000)
+    raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
     return [
         OhlcvCandle(
             timestamp=int(c[0]),

@@ -104,10 +104,10 @@ export function useSymbols(exchange = 'okx', marketType = 'spot') {
   })
 }
 
-export function useBacktestCandles(backtestId: number | null, symbol: string | null) {
+export function useBacktestCandles(backtestId: number | null, symbol: string | null, timeframe = '1d') {
   return useQuery({
-    queryKey: ['admin', 'backtest-candles', backtestId, symbol],
-    queryFn: () => adminApi.getBacktestCandles(backtestId!, symbol!),
+    queryKey: ['admin', 'backtest-candles', backtestId, symbol, timeframe],
+    queryFn: () => adminApi.getBacktestCandles(backtestId!, symbol!, timeframe),
     enabled: backtestId !== null && symbol !== null,
     staleTime: 5 * 60 * 1000,
     retry: 1,
