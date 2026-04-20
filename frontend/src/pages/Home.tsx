@@ -1,7 +1,8 @@
-import { BarChart2, BookOpen, Gem, Link2, Settings, Trophy, Users, Wallet, Zap } from 'lucide-react'
+import { BarChart2, BookOpen, Gem, Link2, Settings, Trophy, Users, Wallet } from 'lucide-react'
 import { type LucideIcon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
+import BrandLogo from '../components/BrandLogo'
 import { usePlans } from '../hooks/useSubscriptions'
 import useAuthStore from '../store/authStore'
 import { Card } from '@/components/ui/card'
@@ -43,13 +44,16 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background pb-20">
-      <div className="px-5 pt-6 pb-4 flex items-center justify-center">
-        <div className="flex items-center gap-2.5">
-          <div className="w-10 h-10 bg-gradient-to-br from-[#6c47ff] to-[#a78bfa] rounded-full flex items-center justify-center">
-            <Zap size={20} className="text-white" />
+      <div className="px-5 pt-6 pb-4">
+        <Card className="p-4 flex items-center gap-3 bg-card/90">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#6c47ff22] to-[#f3b33d22] border border-border flex items-center justify-center shrink-0">
+            <BrandLogo compact className="w-10 h-10 object-contain" alt="Zenith icon" />
           </div>
-          <div className="text-foreground text-[22px] font-bold">ZenithCrypto</div>
-        </div>
+          <div className="min-w-0">
+            <div className="text-foreground text-lg font-bold leading-tight">Zenith</div>
+            <div className="text-muted-foreground text-xs mt-1">Crypto Trading Bot</div>
+          </div>
+        </Card>
       </div>
 
       {user && (

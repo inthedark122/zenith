@@ -2,6 +2,7 @@ import { Home, MessageCircle, Search, User, Zap } from 'lucide-react'
 import { type LucideIcon } from 'lucide-react'
 import { useNavigate, useLocation } from 'react-router-dom'
 
+import BrandLogo from './BrandLogo'
 import { cn } from '@/lib/utils'
 
 interface NavItem {
@@ -36,7 +37,7 @@ export default function BottomNav() {
           >
             {item.center ? (
               <div className="bg-gradient-to-br from-[#6c47ff] to-[#a78bfa] w-[52px] h-[52px] rounded-full flex items-center justify-center -mt-5 shadow-[0_4px_20px_rgba(108,71,255,0.5)]">
-                <Icon size={22} className="text-white" />
+                <BrandLogo compact className="w-9 h-9 rounded-full object-cover" alt="Zenith icon" />
               </div>
             ) : (
               <Icon size={20} className={active ? 'text-[#a78bfa]' : 'text-muted-foreground'} />
