@@ -296,7 +296,9 @@ export function BacktestChart({ backtestId, symbol, orders, periodEnd, height = 
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<Chart | null>(null)
 
-  // Init chart — re-run when backtestId or symbol changes
+  // Init chart — re-run when backtestId, symbol, or timeframe changes.
+  // Re-creating on TF change avoids a race condition where a slow in-flight
+  // response for the previous period overwrites the new period's data.
   useEffect(() => {
     if (!containerRef.current) return
 
@@ -306,27 +308,23 @@ export function BacktestChart({ backtestId, symbol, orders, periodEnd, height = 
 
     chart.setStyles(CHART_STYLES)
 
-    // setDataLoader must be registered before setSymbol/setPeriod so the
-    // initial load fires correctly when setPeriod triggers _processDataLoad.
     chart.setDataLoader({
-        getBars: async ({ type, timestamp, period, callback }) => {
-          const tf = periodToTF(period)
-          let before: number | undefined
-          if (type === 'forward' && timestamp != null) {
-            // Scroll left — load candles older than the oldest visible
-            before = timestamp
-          } else if (type === 'init' && periodEnd) {
-            // Anchor initial view to just after the backtest period so trades are visible
-            before = new Date(periodEnd).getTime() + TF_INTERVAL_MS[tf] * 5
-          }
-          try {
-            const candles = await adminApi.getBacktestCandles(backtestId, symbol, tf, before)
-            callback(candles as KLineData[], { forward: candles.length >= PAGE_SIZE })
-          } catch {
-            callback([], { forward: false })
-          }
-        },
-      })
+      getBars: async ({ type, timestamp, period, callback }) => {
+        const tf = periodToTF(period)
+        let before: number | undefined
+        if (type === 'forward' && timestamp != null) {
+          before = timestamp
+        } else if (type === 'init' && periodEnd) {
+          before = new Date(periodEnd).getTime() + TF_INTERVAL_MS[tf] * 5
+        }
+        try {
+          const candles = await adminApi.getBacktestCandles(backtestId, symbol, tf, before)
+          callback(candles as KLineData[], { forward: candles.length >= PAGE_SIZE })
+        } catch {
+          callback([], { forward: false })
+        }
+      },
+    })
 
     chart.setSymbol({ ticker: symbol, pricePrecision: 2, volumePrecision: 6 })
     chart.setPeriod(parsePeriod(timeframe))
@@ -341,13 +339,7 @@ export function BacktestChart({ backtestId, symbol, orders, periodEnd, height = 
       if (containerRef.current) dispose(containerRef.current)
       chartRef.current = null
     }
-  }, [backtestId, symbol]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Update period when timeframe toggle changes
-  useEffect(() => {
-    if (!chartRef.current) return
-    chartRef.current.setPeriod(parsePeriod(timeframe))
-  }, [timeframe])
+  }, [backtestId, symbol, timeframe]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-3">
