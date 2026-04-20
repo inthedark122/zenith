@@ -16,4 +16,6 @@ export const adminApi = {
     client.post<StrategyBacktestRun>(`/admin/strategies/${strategyId}/backtest`, payload).then((r) => r.data),
   publishBacktest: (strategyId: number, backtestId: number, isPublic: boolean): Promise<StrategyBacktestRun> =>
     client.patch<StrategyBacktestRun>(`/admin/strategies/${strategyId}/backtests/${backtestId}`, { is_public: isPublic }).then((r) => r.data),
+  getSymbols: (exchange = 'okx', marketType = 'spot'): Promise<string[]> =>
+    client.get<string[]>('/admin/symbols', { params: { exchange, market_type: marketType } }).then((r) => r.data),
 }

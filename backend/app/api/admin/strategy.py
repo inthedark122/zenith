@@ -1,7 +1,8 @@
-from typing import List
+import time
+from typing import Dict, List, Optional, Tuple
 
 import ccxt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, selectinload
 
@@ -173,3 +174,63 @@ def patch_backtest(
     db.commit()
     db.refresh(run)
     return run
+
+
+# ---------------------------------------------------------------------------
+# Symbol catalogue
+# ---------------------------------------------------------------------------
+
+# In-memory cache: key → (symbols_list, fetched_at_unix)
+_symbols_cache: Dict[Tuple[str, str], Tuple[List[str], float]] = {}
+_SYMBOLS_TTL = 600  # 10 minutes
+
+SUPPORTED_EXCHANGES_MAP = {
+    "okx": ccxt.okx,
+    "binance": ccxt.binance,
+    "bybit": ccxt.bybit,
+}
+
+
+@router.get("/symbols", response_model=List[str])
+def list_symbols(
+    exchange: str = Query(default="okx", description="Exchange ID"),
+    market_type: str = Query(default="spot", description="Market type: spot, swap, future"),
+    _admin: User = Depends(get_current_admin),
+):
+    """Return available trading symbols for a given exchange and market type.
+
+    Results are cached in-memory for 10 minutes to avoid rate-limit issues.
+    """
+    exchange_id = exchange.lower()
+    market_type_lc = market_type.lower()
+    cache_key = (exchange_id, market_type_lc)
+
+    # Return cached result if still fresh
+    if cache_key in _symbols_cache:
+        cached_symbols, fetched_at = _symbols_cache[cache_key]
+        if time.time() - fetched_at < _SYMBOLS_TTL:
+            return cached_symbols
+
+    if exchange_id not in SUPPORTED_EXCHANGES_MAP:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported exchange '{exchange_id}'. Supported: {list(SUPPORTED_EXCHANGES_MAP)}",
+        )
+
+    try:
+        ex = SUPPORTED_EXCHANGES_MAP[exchange_id]({"enableRateLimit": True})
+        markets = ex.load_markets()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to load markets from {exchange_id}: {exc}")
+
+    symbols = sorted(
+        symbol
+        for symbol, market in markets.items()
+        if market.get("type", "").lower() == market_type_lc
+        and market.get("active", True)
+        and market.get("base") is not None
+        and market.get("quote") is not None
+    )
+
+    _symbols_cache[cache_key] = (symbols, time.time())
+    return symbols

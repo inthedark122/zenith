@@ -94,3 +94,12 @@ export function usePublishBacktest() {
     },
   })
 }
+
+export function useSymbols(exchange = 'okx', marketType = 'spot') {
+  return useQuery({
+    queryKey: ['admin', 'symbols', exchange, marketType],
+    queryFn: () => adminApi.getSymbols(exchange, marketType),
+    staleTime: 10 * 60 * 1000, // 10 minutes — matches backend cache TTL
+    retry: 1,
+  })
+}

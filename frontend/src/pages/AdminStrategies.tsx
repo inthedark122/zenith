@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SymbolPicker } from '@/components/ui/symbol-picker'
 
 function defaultPayload(): AdminStrategyPayload {
   return {
@@ -74,10 +75,9 @@ export default function AdminStrategies() {
               </div>
               <div className="sm:col-span-2">
                 <Label>Symbols</Label>
-                <Input
-                  value={form.symbols.join(', ')}
-                  onChange={(e) => setForm((f) => ({ ...f, symbols: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) }))}
-                  placeholder="BTC/USDT, ETH/USDT"
+                <SymbolPicker
+                  value={form.symbols}
+                  onChange={(syms) => setForm((f) => ({ ...f, symbols: syms }))}
                   className="mt-1"
                 />
               </div>

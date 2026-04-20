@@ -32,6 +32,7 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
+import { SymbolPicker } from '@/components/ui/symbol-picker'
 
 // ---- Small helpers ----
 
@@ -359,13 +360,10 @@ export default function AdminStrategyDetail() {
                 <Input value={form.strategy} disabled className="mt-1" />
               </div>
               <div className="sm:col-span-2">
-                <Label>Symbols (comma separated)</Label>
-                <Input
-                  value={form.symbols.join(', ')}
-                  onChange={(e) =>
-                    handleFieldChange('symbols', e.target.value.split(',').map((s) => s.trim()).filter(Boolean))
-                  }
-                  placeholder="BTC/USDT, ETH/USDT"
+                <Label>Symbols</Label>
+                <SymbolPicker
+                  value={form.symbols}
+                  onChange={(syms) => handleFieldChange('symbols', syms)}
                   className="mt-1"
                 />
               </div>
