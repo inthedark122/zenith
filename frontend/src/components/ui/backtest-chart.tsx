@@ -6,32 +6,59 @@ import { StrategyBacktestOrder } from '@/types'
 
 // ---- Custom triangle overlays (registered once) ----
 
+interface BuyOverlayData { price: number; amount: number }
+interface ExitOverlayData { price: number; pnl: number; color: string }
+
+function fmtPrice(p: number): string {
+  if (p >= 10000) return p.toLocaleString('en-US', { maximumFractionDigits: 0 })
+  if (p >= 1) return p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return p.toPrecision(4)
+}
+
+function fmtUsd(v: number): string {
+  const abs = Math.abs(v)
+  const prefix = v < 0 ? '-$' : '$'
+  return prefix + abs.toFixed(2)
+}
+
 let _overlaysRegistered = false
 function ensureOverlays() {
   if (_overlaysRegistered) return
   _overlaysRegistered = true
 
-  // Green ▲ — apex at price, base below
-  registerOverlay({
+  // Green ▲ — apex at price, base below; shows price + amount below base
+  registerOverlay<BuyOverlayData>({
     name: 'buyTriangle',
     totalStep: 2,
     needDefaultPointFigure: false,
     needDefaultXAxisFigure: false,
     needDefaultYAxisFigure: false,
-    createPointFigures: ({ coordinates }) => {
+    createPointFigures: ({ overlay, coordinates }) => {
       const { x, y } = coordinates[0]
       const s = 7
-      return [{
-        type: 'polygon',
-        attrs: { coordinates: [{ x, y }, { x: x - s, y: y + s * 1.7 }, { x: x + s, y: y + s * 1.7 }] },
-        styles: { style: 'fill', color: '#4ade80', borderColor: '#4ade80', borderSize: 0 },
-        ignoreEvent: true,
-      }]
+      const baseY = y + s * 1.7
+      const d = overlay.extendData as BuyOverlayData | undefined
+      const figs: object[] = [
+        {
+          type: 'polygon',
+          attrs: { coordinates: [{ x, y }, { x: x - s, y: baseY }, { x: x + s, y: baseY }] },
+          styles: { style: 'fill', color: '#4ade80', borderColor: '#4ade80', borderSize: 0 },
+          ignoreEvent: true,
+        },
+      ]
+      if (d) {
+        figs.push(
+          { type: 'text', attrs: { x, y: baseY + 4, text: fmtPrice(d.price), align: 'center', baseline: 'top' }, styles: { color: '#4ade80', size: 10, family: 'inherit', weight: 'normal' }, ignoreEvent: true },
+          { type: 'text', attrs: { x, y: baseY + 16, text: fmtUsd(d.amount), align: 'center', baseline: 'top' }, styles: { color: 'rgba(74,222,128,0.65)', size: 10, family: 'inherit', weight: 'normal' }, ignoreEvent: true },
+        )
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return figs as any
     },
   })
 
-  // ▼ — apex at price, base above; color via extendData
-  registerOverlay({
+  // ▼ — apex at price, base above; shows price + pnl below apex; color via extendData
+  registerOverlay<ExitOverlayData>({
     name: 'exitTriangle',
     totalStep: 2,
     needDefaultPointFigure: false,
@@ -40,13 +67,25 @@ function ensureOverlays() {
     createPointFigures: ({ overlay, coordinates }) => {
       const { x, y } = coordinates[0]
       const s = 7
-      const color = (overlay.extendData as string | undefined) ?? '#f87171'
-      return [{
-        type: 'polygon',
-        attrs: { coordinates: [{ x, y }, { x: x - s, y: y - s * 1.7 }, { x: x + s, y: y - s * 1.7 }] },
-        styles: { style: 'fill', color, borderColor: color, borderSize: 0 },
-        ignoreEvent: true,
-      }]
+      const d = overlay.extendData as ExitOverlayData | undefined
+      const color = d?.color ?? '#f87171'
+      const pnlColor = (d?.pnl ?? 0) >= 0 ? 'rgba(74,222,128,0.65)' : 'rgba(248,113,113,0.65)'
+      const figs: object[] = [
+        {
+          type: 'polygon',
+          attrs: { coordinates: [{ x, y }, { x: x - s, y: y - s * 1.7 }, { x: x + s, y: y - s * 1.7 }] },
+          styles: { style: 'fill', color, borderColor: color, borderSize: 0 },
+          ignoreEvent: true,
+        },
+      ]
+      if (d) {
+        figs.push(
+          { type: 'text', attrs: { x, y: y + 4, text: fmtPrice(d.price), align: 'center', baseline: 'top' }, styles: { color, size: 10, family: 'inherit', weight: 'normal' }, ignoreEvent: true },
+          { type: 'text', attrs: { x, y: y + 16, text: fmtUsd(d.pnl), align: 'center', baseline: 'top' }, styles: { color: pnlColor, size: 10, family: 'inherit', weight: 'normal' }, ignoreEvent: true },
+        )
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return figs as any
     },
   })
 }
@@ -150,7 +189,7 @@ function addOrderOverlays(chart: Chart, orders: StrategyBacktestOrder[], symbol:
     const exitTs = new Date(order.closed_at).getTime()
     const exitColor = order.status === 'win' ? '#4ade80' : '#f87171'
 
-    chart.createOverlay({ name: 'buyTriangle', lock: true, points: [{ timestamp: entryTs, value: order.entry_price }] })
+    chart.createOverlay({ name: 'buyTriangle', lock: true, points: [{ timestamp: entryTs, value: order.entry_price }], extendData: { price: order.entry_price, amount: order.margin_per_trade } as BuyOverlayData })
 
     chart.createOverlay({
       name: 'horizontalSegment',
@@ -166,7 +205,7 @@ function addOrderOverlays(chart: Chart, orders: StrategyBacktestOrder[], symbol:
       styles: { line: { color: 'rgba(248,113,113,0.45)', size: 1, style: 'dashed', dashedValue: [4, 4] }, point: { color: 'transparent', borderColor: 'transparent', radius: 0, activeRadius: 0 } },
     })
 
-    chart.createOverlay({ name: 'exitTriangle', lock: true, points: [{ timestamp: exitTs, value: order.exit_price }], extendData: exitColor })
+    chart.createOverlay({ name: 'exitTriangle', lock: true, points: [{ timestamp: exitTs, value: order.exit_price }], extendData: { price: order.exit_price, pnl: order.pnl_usd, color: exitColor } as ExitOverlayData })
   }
 }
 
