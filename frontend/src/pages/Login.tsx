@@ -1,13 +1,12 @@
-import { Eye, EyeOff, Zap } from 'lucide-react'
+import { Eye, EyeOff, User } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 
+import BrandLogo from '../components/BrandLogo'
 import { useLogin } from '../hooks/useAuth'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { InputField } from '@/components/ui/input'
 
 interface LoginFormValues {
   email: string
@@ -30,105 +29,101 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-6">
-      <Card className="w-full max-w-[400px] p-10">
-        <CardHeader className="items-center p-0 mb-6">
-          <div className="w-14 h-14 bg-gradient-to-br from-[#6c47ff] to-[#a78bfa] rounded-full flex items-center justify-center mb-4">
-            <Zap size={28} className="text-white" />
-          </div>
-          <h1 className="text-2xl font-bold text-foreground">Welcome Back</h1>
-          <p className="text-muted-foreground text-sm mt-1">Sign in to Zenith Trading Bot</p>
-        </CardHeader>
+    <div className="min-h-screen bg-background flex flex-col px-6 pt-16 pb-10">
+      {/* Heading row */}
+      <div className="flex items-center justify-between mb-10">
+        <h1 className="text-3xl font-bold text-foreground leading-tight">Welcome Back</h1>
+        <BrandLogo compact className="w-24 h-24 object-contain" alt="Zenith" />
+      </div>
 
-        <CardContent className="p-0">
-          {loginMutation.error && (
-            <p className="text-destructive text-xs mb-3 text-center">
-              {loginMutation.error.message ?? 'Login failed'}
-            </p>
-          )}
-
-          <form onSubmit={handleSubmit(onSubmit)}>
-            <div className="mb-4">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="Enter your email"
-                {...register('email', { required: 'Email is required' })}
-              />
-              {errors.email && (
-                <p className="text-destructive text-xs mt-1">{errors.email.message}</p>
-              )}
-            </div>
-
-            <div className="mb-4">
-              <Label htmlFor="password">Password</Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPw ? 'text' : 'password'}
-                  placeholder="Enter your password"
-                  className="pr-11"
-                  {...register('password', { required: 'Password is required' })}
-                />
-                <button
-                  type="button"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                  onClick={() => setShowPw((p) => !p)}
-                >
-                  {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-              {errors.password && (
-                <p className="text-destructive text-xs mt-1">{errors.password.message}</p>
-              )}
-            </div>
-
-            <a
-              href="#"
-              className="block text-right text-[#6c47ff] text-xs mb-5 no-underline hover:underline"
-            >
-              Forgot Password?
-            </a>
-
-            <div className="flex items-center gap-2 mb-6">
-              <input
-                type="checkbox"
-                id="agree"
-                checked={agreed}
-                onChange={(e) => setAgreed(e.target.checked)}
-                className="accent-[#6c47ff]"
-              />
-              <label htmlFor="agree" className="text-muted-foreground text-xs">
-                I agree to the{' '}
-                <a href="#" className="text-[#6c47ff] no-underline hover:underline">
-                  Terms of Service
-                </a>{' '}
-                and{' '}
-                <a href="#" className="text-[#6c47ff] no-underline hover:underline">
-                  Privacy Policy
-                </a>
-              </label>
-            </div>
-
-            <Button
-              type="submit"
-              size="lg"
-              disabled={loginMutation.isPending || !agreed}
-              className="w-full mb-5"
-            >
-              {loginMutation.isPending ? 'Signing in…' : 'Login'}
-            </Button>
-          </form>
-
-          <p className="text-center text-muted-foreground text-sm">
-            Don&apos;t have an account?{' '}
-            <Link to="/register" className="text-[#6c47ff] no-underline hover:underline">
-              Register
-            </Link>
+      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 flex-1">
+        {loginMutation.error && (
+          <p className="text-destructive text-sm text-center -mt-2">
+            {loginMutation.error.message ?? 'Login failed'}
           </p>
-        </CardContent>
-      </Card>
+        )}
+
+        {/* Email */}
+        <div>
+          <InputField
+            type="email"
+            placeholder="Email"
+            icon={<User size={18} />}
+            {...register('email', { required: 'Email is required' })}
+          />
+          {errors.email && (
+            <p className="text-destructive text-xs mt-1 pl-1">{errors.email.message}</p>
+          )}
+        </div>
+
+        {/* Password */}
+        <div>
+          <InputField
+            type={showPw ? 'text' : 'password'}
+            placeholder="Password"
+            icon={showPw ? <EyeOff size={18} /> : <Eye size={18} />}
+            onIconClick={() => setShowPw((p) => !p)}
+            {...register('password', { required: 'Password is required' })}
+          />
+          {errors.password && (
+            <p className="text-destructive text-xs mt-1 pl-1">{errors.password.message}</p>
+          )}
+        </div>
+
+        {/* Forgot password */}
+        <div className="flex justify-end -mt-1">
+          <a href="#" className="text-muted-foreground text-sm hover:text-foreground transition-colors">
+            Forgot Password
+          </a>
+        </div>
+
+        {/* Terms */}
+        <label className="flex items-start gap-3 cursor-pointer mt-1">
+          <div className="relative mt-0.5 shrink-0">
+            <input
+              type="checkbox"
+              checked={agreed}
+              onChange={(e) => setAgreed(e.target.checked)}
+              className="sr-only"
+            />
+            <div
+              className={`w-5 h-5 rounded flex items-center justify-center border transition-colors ${
+                agreed ? 'bg-[#6c47ff] border-[#6c47ff]' : 'border-border bg-[#111]'
+              }`}
+            >
+              {agreed && (
+                <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 12 12">
+                  <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </div>
+          </div>
+          <span className="text-muted-foreground text-sm leading-snug">
+            By logging in, you confirm that you have read, understood, and fully agree to the terms under{' '}
+            <a href="#" className="text-[#6c47ff] font-semibold hover:underline">
+              Zenith's User Agreement and Authorization Consent
+            </a>
+          </span>
+        </label>
+
+        {/* Submit */}
+        <Button
+          type="submit"
+          size="pill"
+          disabled={loginMutation.isPending || !agreed}
+          className="w-full mt-4"
+        >
+          {loginMutation.isPending ? 'Signing in…' : 'Log In'}
+        </Button>
+
+        {/* Register link */}
+        <p className="text-center text-muted-foreground text-sm mt-2">
+          Don&apos;t have an account?{' '}
+          <Link to="/register" className="text-[#6c47ff] font-semibold hover:underline">
+            Register
+          </Link>
+        </p>
+      </form>
     </div>
   )
 }
