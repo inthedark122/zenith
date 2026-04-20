@@ -64,8 +64,8 @@ class StrategyBacktestRequest(BaseModel):
     @field_validator("lookback_days")
     @classmethod
     def validate_lookback_days(cls, v: int) -> int:
-        if v < 60 or v > 1000:
-            raise ValueError("lookback_days must be between 60 and 1000")
+        if v < 14 or v > 1000:
+            raise ValueError("lookback_days must be between 14 and 1000")
         return v
 
     @field_validator("margin_per_trade")
