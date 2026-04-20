@@ -17,8 +17,7 @@ function fmtPrice(p: number): string {
 
 function fmtUsd(v: number): string {
   const abs = Math.abs(v)
-  const prefix = v < 0 ? '-$' : '$'
-  return prefix + abs.toFixed(2)
+  return (v < 0 ? '-$' : '+$') + abs.toFixed(2)
 }
 
 let _overlaysRegistered = false
@@ -26,7 +25,7 @@ function ensureOverlays() {
   if (_overlaysRegistered) return
   _overlaysRegistered = true
 
-  // Green ▲ — apex at price, base below; shows price + amount below base
+  // Green ▲ — apex at price, base below; labels below the base
   registerOverlay<BuyOverlayData>({
     name: 'buyTriangle',
     totalStep: 2,
@@ -35,21 +34,25 @@ function ensureOverlays() {
     needDefaultYAxisFigure: false,
     createPointFigures: ({ overlay, coordinates }) => {
       const { x, y } = coordinates[0]
-      const s = 7
-      const baseY = y + s * 1.7
+      const s = 8
+      const baseY = y + s * 1.7   // bottom edge of ▲
       const d = overlay.extendData as BuyOverlayData | undefined
       const figs: object[] = [
         {
           type: 'polygon',
           attrs: { coordinates: [{ x, y }, { x: x - s, y: baseY }, { x: x + s, y: baseY }] },
-          styles: { style: 'fill', color: '#4ade80', borderColor: '#4ade80', borderSize: 0 },
+          styles: { style: 'fill', color: '#22c55e', borderColor: '#22c55e', borderSize: 0 },
           ignoreEvent: true,
         },
       ]
       if (d) {
         figs.push(
-          { type: 'text', attrs: { x, y: baseY + 4, text: fmtPrice(d.price), align: 'center', baseline: 'top' }, styles: { color: '#4ade80', size: 10, family: 'inherit', weight: 'normal' }, ignoreEvent: true },
-          { type: 'text', attrs: { x, y: baseY + 16, text: fmtUsd(d.amount), align: 'center', baseline: 'top' }, styles: { color: 'rgba(74,222,128,0.65)', size: 10, family: 'inherit', weight: 'normal' }, ignoreEvent: true },
+          // price — just below base
+          { type: 'text', attrs: { x, y: baseY + 5, text: fmtPrice(d.price), align: 'center', baseline: 'top' },
+            styles: { color: '#4ade80', size: 11, family: 'inherit', weight: 'bold' }, ignoreEvent: true },
+          // amount — below price
+          { type: 'text', attrs: { x, y: baseY + 18, text: fmtUsd(d.amount), align: 'center', baseline: 'top' },
+            styles: { color: '#86efac', size: 11, family: 'inherit', weight: 'bold' }, ignoreEvent: true },
         )
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,7 +60,7 @@ function ensureOverlays() {
     },
   })
 
-  // ▼ — apex at price, base above; shows price + pnl below apex; color via extendData
+  // ▼ — apex at price (bottom), base above; labels above the base
   registerOverlay<ExitOverlayData>({
     name: 'exitTriangle',
     totalStep: 2,
@@ -66,22 +69,27 @@ function ensureOverlays() {
     needDefaultYAxisFigure: false,
     createPointFigures: ({ overlay, coordinates }) => {
       const { x, y } = coordinates[0]
-      const s = 7
+      const s = 8
+      const baseY = y - s * 1.7   // top edge of ▼
       const d = overlay.extendData as ExitOverlayData | undefined
       const color = d?.color ?? '#f87171'
-      const pnlColor = (d?.pnl ?? 0) >= 0 ? 'rgba(74,222,128,0.65)' : 'rgba(248,113,113,0.65)'
+      const pnlColor = (d?.pnl ?? 0) >= 0 ? '#4ade80' : '#f87171'
       const figs: object[] = [
         {
           type: 'polygon',
-          attrs: { coordinates: [{ x, y }, { x: x - s, y: y - s * 1.7 }, { x: x + s, y: y - s * 1.7 }] },
+          attrs: { coordinates: [{ x, y }, { x: x - s, y: baseY }, { x: x + s, y: baseY }] },
           styles: { style: 'fill', color, borderColor: color, borderSize: 0 },
           ignoreEvent: true,
         },
       ]
       if (d) {
         figs.push(
-          { type: 'text', attrs: { x, y: y + 4, text: fmtPrice(d.price), align: 'center', baseline: 'top' }, styles: { color, size: 10, family: 'inherit', weight: 'normal' }, ignoreEvent: true },
-          { type: 'text', attrs: { x, y: y + 16, text: fmtUsd(d.pnl), align: 'center', baseline: 'top' }, styles: { color: pnlColor, size: 10, family: 'inherit', weight: 'normal' }, ignoreEvent: true },
+          // pnl — further above base
+          { type: 'text', attrs: { x, y: baseY - 5, text: fmtUsd(d.pnl), align: 'center', baseline: 'bottom' },
+            styles: { color: pnlColor, size: 11, family: 'inherit', weight: 'bold' }, ignoreEvent: true },
+          // price — just above base
+          { type: 'text', attrs: { x, y: baseY - 18, text: fmtPrice(d.price), align: 'center', baseline: 'bottom' },
+            styles: { color, size: 11, family: 'inherit', weight: 'bold' }, ignoreEvent: true },
         )
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
