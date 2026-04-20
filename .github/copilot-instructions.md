@@ -46,6 +46,10 @@ curl -s -o /dev/null -w "backend: %{http_code}\n" http://localhost:8011/health
 curl -s -o /dev/null -w "frontend: %{http_code}\n" http://localhost:3000
 ```
 
+## Git Workflow
+
+**Never run `git push` automatically.** Always commit changes locally and stop there. The developer will push manually or explicitly request the agent to push.
+
 ## Project Structure
 
 - **Backend**: FastAPI, SQLAlchemy, Alembic — `backend/`
