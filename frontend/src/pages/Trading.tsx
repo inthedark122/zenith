@@ -399,7 +399,9 @@ export default function Trading() {
       <div className="px-5 pt-6 pb-4">
         <h1 className="text-foreground text-[22px] font-bold">Trading</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          DCA_MACD_DAILY · Workers run automatically
+          {strategies.length > 0
+            ? `${strategies.length} strateg${strategies.length === 1 ? 'y' : 'ies'} available`
+            : 'No strategies available yet'}
         </p>
         <div className="flex items-center gap-2 mt-3">
           <Card className="flex-1 px-4 py-2.5 text-center">

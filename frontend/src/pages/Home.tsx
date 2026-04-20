@@ -3,6 +3,7 @@ import { type LucideIcon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 import BrandLogo from '../components/BrandLogo'
+import { useStrategies } from '../hooks/useTrading'
 import { usePlans } from '../hooks/useSubscriptions'
 import useAuthStore from '../store/authStore'
 import { Card } from '@/components/ui/card'
@@ -12,11 +13,6 @@ interface MenuItem {
   icon: LucideIcon
   label: string
   path: string
-}
-
-interface StrategyRow {
-  label: string
-  value: string
 }
 
 const menuItems: MenuItem[] = [
@@ -30,17 +26,11 @@ const menuItems: MenuItem[] = [
   { icon: Gem, label: 'Subscribe', path: '/subscriptions' },
 ]
 
-const strategyRows: StrategyRow[] = [
-  { label: 'Timeframe', value: 'Daily (D1)' },
-  { label: 'Signal', value: 'MACD Bullish Crossover' },
-  { label: 'Direction', value: 'Long only' },
-  { label: 'Risk:Reward', value: '1:2' },
-]
-
 export default function Home() {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const { data: plans = [] } = usePlans()
+  const { data: strategies = [] } = useStrategies()
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -106,20 +96,39 @@ export default function Home() {
         </p>
       </Card>
 
-      <div className="text-foreground text-base font-semibold px-5 pt-5 pb-2">
-        DCA_MACD_DAILY Strategy
-      </div>
-      <Card className="mx-5 p-5">
-        {strategyRows.map((row, i) => (
-          <div key={row.label}>
-            <div className="flex justify-between py-2">
-              <span className="text-muted-foreground text-sm">{row.label}</span>
-              <span className="text-foreground font-semibold text-sm">{row.value}</span>
-            </div>
-            {i < strategyRows.length - 1 && <Separator />}
+      {strategies.length > 0 && (
+        <>
+          <div className="text-foreground text-base font-semibold px-5 pt-5 pb-2">
+            Available Strategies
           </div>
-        ))}
-      </Card>
+          {strategies.map((s) => (
+            <Card key={s.id} className="mx-5 mb-3 p-5 cursor-pointer hover:border-[#333] transition-colors" onClick={() => navigate('/trading')}>
+              <div className="flex justify-between items-center mb-3">
+                <span className="text-foreground font-semibold">{s.name}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${s.is_active ? 'bg-success/20 text-success' : 'bg-muted text-muted-foreground'}`}>
+                  {s.is_active ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {[
+                  { label: 'Strategy', value: s.strategy },
+                  { label: 'Symbols', value: s.symbols.join(', ') },
+                  { label: 'Leverage', value: `${s.leverage}×` },
+                  { label: 'Risk:Reward', value: `1:${s.rr_ratio}` },
+                ].map((row, i, arr) => (
+                  <div key={row.label}>
+                    <div className="flex justify-between py-1.5">
+                      <span className="text-muted-foreground text-sm">{row.label}</span>
+                      <span className="text-foreground font-semibold text-sm">{row.value}</span>
+                    </div>
+                    {i < arr.length - 1 && <Separator />}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          ))}
+        </>
+      )}
     </div>
   )
 }
