@@ -197,6 +197,7 @@ _TIMEFRAME_MULTIPLIERS: Dict[str, int] = {
     "1h": 24,
     "30m": 48,
     "15m": 96,
+    "5m": 288,
 }
 _TIMEFRAME_INTERVAL_MS: Dict[str, int] = {
     "1d": 86_400_000,
@@ -204,6 +205,7 @@ _TIMEFRAME_INTERVAL_MS: Dict[str, int] = {
     "1h": 3_600_000,
     "30m": 1_800_000,
     "15m": 900_000,
+    "5m": 300_000,
 }
 _VALID_TIMEFRAMES = set(_TIMEFRAME_MULTIPLIERS)
 _CANDLE_PAGE_SIZE = 300
@@ -213,7 +215,7 @@ _CANDLE_PAGE_SIZE = 300
 def get_backtest_candles(
     backtest_id: int,
     symbol: str = Query(..., description="Trading pair e.g. BTC/USDT"),
-    timeframe: str = Query(default="1d", description="OHLCV timeframe: 1d, 4h, 1h, 30m, 15m"),
+    timeframe: str = Query(default="1d", description="OHLCV timeframe: 1d, 4h, 1h, 30m, 15m, 5m"),
     before: Optional[int] = Query(None, description="Return candles with timestamp < before (Unix ms). Omit for latest."),
     db: Session = Depends(get_db),
     _admin: User = Depends(get_current_admin),

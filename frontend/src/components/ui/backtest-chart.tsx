@@ -116,7 +116,7 @@ function ensureOverlays() {
 
 // ---- Timeframe helpers ----
 
-type TF = '1d' | '4h' | '1h' | '30m' | '15m'
+type TF = '1d' | '4h' | '1h' | '30m' | '15m' | '5m'
 
 const TIMEFRAMES: { value: TF; label: string }[] = [
   { value: '1d', label: '1D' },
@@ -124,6 +124,7 @@ const TIMEFRAMES: { value: TF; label: string }[] = [
   { value: '1h', label: '1H' },
   { value: '30m', label: '30M' },
   { value: '15m', label: '15M' },
+  { value: '5m', label: '5M' },
 ]
 
 function parsePeriod(tf: TF): Period {
@@ -133,6 +134,7 @@ function parsePeriod(tf: TF): Period {
     '1h': { type: 'hour', span: 1 },
     '30m': { type: 'minute', span: 30 },
     '15m': { type: 'minute', span: 15 },
+    '5m': { type: 'minute', span: 5 },
   }
   return map[tf]
 }
@@ -142,6 +144,16 @@ function periodToTF(period: Period): TF {
   if (period.type === 'hour') return `${period.span}h` as TF
   if (period.type === 'minute') return `${period.span}m` as TF
   return '1d'
+}
+
+// Milliseconds per candle — used to anchor initial load to the backtest period
+const TF_INTERVAL_MS: Record<TF, number> = {
+  '1d': 86_400_000,
+  '4h': 14_400_000,
+  '1h': 3_600_000,
+  '30m': 1_800_000,
+  '15m': 900_000,
+  '5m': 300_000,
 }
 
 const PAGE_SIZE = 300
@@ -272,10 +284,12 @@ interface BacktestChartProps {
   backtestId: number
   symbol: string
   orders: StrategyBacktestOrder[]
+  /** ISO date string (e.g. "2024-12-31") — used to anchor initial candle load to the backtest period */
+  periodEnd?: string
   height?: number
 }
 
-export function BacktestChart({ backtestId, symbol, orders, height = 420 }: BacktestChartProps) {
+export function BacktestChart({ backtestId, symbol, orders, periodEnd, height = 420 }: BacktestChartProps) {
   ensureOverlays()
 
   const [timeframe, setTimeframe] = useState<TF>('1d')
@@ -295,18 +309,24 @@ export function BacktestChart({ backtestId, symbol, orders, height = 420 }: Back
     // setDataLoader must be registered before setSymbol/setPeriod so the
     // initial load fires correctly when setPeriod triggers _processDataLoad.
     chart.setDataLoader({
-      getBars: async ({ type, timestamp, period, callback }) => {
-        const tf = periodToTF(period)
-        // 'forward' = user scrolled left → load candles BEFORE the oldest visible timestamp
-        const before = type === 'forward' && timestamp != null ? timestamp : undefined
-        try {
-          const candles = await adminApi.getBacktestCandles(backtestId, symbol, tf, before)
-          callback(candles as KLineData[], { forward: candles.length >= PAGE_SIZE })
-        } catch {
-          callback([], { forward: false })
-        }
-      },
-    })
+        getBars: async ({ type, timestamp, period, callback }) => {
+          const tf = periodToTF(period)
+          let before: number | undefined
+          if (type === 'forward' && timestamp != null) {
+            // Scroll left — load candles older than the oldest visible
+            before = timestamp
+          } else if (type === 'init' && periodEnd) {
+            // Anchor initial view to just after the backtest period so trades are visible
+            before = new Date(periodEnd).getTime() + TF_INTERVAL_MS[tf] * 5
+          }
+          try {
+            const candles = await adminApi.getBacktestCandles(backtestId, symbol, tf, before)
+            callback(candles as KLineData[], { forward: candles.length >= PAGE_SIZE })
+          } catch {
+            callback([], { forward: false })
+          }
+        },
+      })
 
     chart.setSymbol({ ticker: symbol, pricePrecision: 2, volumePrecision: 6 })
     chart.setPeriod(parsePeriod(timeframe))

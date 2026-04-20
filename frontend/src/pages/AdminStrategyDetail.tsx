@@ -576,6 +576,7 @@ export default function AdminStrategyDetail() {
                           backtestId={selectedRun.id}
                           orders={selectedRun.orders}
                           symbol={chartSymbol}
+                          periodEnd={selectedRun.period_end}
                         />
                       </Card>
                     )}
