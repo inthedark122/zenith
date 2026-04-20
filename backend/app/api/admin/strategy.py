@@ -198,7 +198,15 @@ _TIMEFRAME_MULTIPLIERS: Dict[str, int] = {
     "30m": 48,
     "15m": 96,
 }
+_TIMEFRAME_INTERVAL_MS: Dict[str, int] = {
+    "1d": 86_400_000,
+    "4h": 14_400_000,
+    "1h": 3_600_000,
+    "30m": 1_800_000,
+    "15m": 900_000,
+}
 _VALID_TIMEFRAMES = set(_TIMEFRAME_MULTIPLIERS)
+_CANDLE_PAGE_SIZE = 300
 
 
 @router.get("/backtests/{backtest_id}/candles", response_model=List[OhlcvCandle])
@@ -206,10 +214,15 @@ def get_backtest_candles(
     backtest_id: int,
     symbol: str = Query(..., description="Trading pair e.g. BTC/USDT"),
     timeframe: str = Query(default="1d", description="OHLCV timeframe: 1d, 4h, 1h, 30m, 15m"),
+    before: Optional[int] = Query(None, description="Return candles with timestamp < before (Unix ms). Omit for latest."),
     db: Session = Depends(get_db),
     _admin: User = Depends(get_current_admin),
 ):
-    """Fetch OHLCV candles for the period covered by a backtest run."""
+    """Fetch OHLCV candles for the period covered by a backtest run.
+
+    Supports pagination: pass *before* (oldest timestamp seen) to load earlier candles.
+    Returns at most _CANDLE_PAGE_SIZE candles per call.
+    """
     if timeframe not in _VALID_TIMEFRAMES:
         raise HTTPException(status_code=400, detail=f"Unsupported timeframe. Use one of: {sorted(_VALID_TIMEFRAMES)}")
 
@@ -218,9 +231,16 @@ def get_backtest_candles(
         raise HTTPException(status_code=404, detail="Backtest run not found")
 
     exchange = create_exchange("okx")
-    multiplier = _TIMEFRAME_MULTIPLIERS[timeframe]
-    limit = min((run.lookback_days + 30) * multiplier, 1000)
-    raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+
+    if before is not None:
+        interval_ms = _TIMEFRAME_INTERVAL_MS[timeframe]
+        since = before - (_CANDLE_PAGE_SIZE + 10) * interval_ms
+        raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=_CANDLE_PAGE_SIZE + 10)
+        raw = [c for c in raw if c[0] < before]
+        raw = raw[-_CANDLE_PAGE_SIZE:]
+    else:
+        raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=_CANDLE_PAGE_SIZE)
+
     return [
         OhlcvCandle(
             timestamp=int(c[0]),

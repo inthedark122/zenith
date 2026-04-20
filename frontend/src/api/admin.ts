@@ -18,6 +18,6 @@ export const adminApi = {
     client.patch<StrategyBacktestRun>(`/admin/strategies/${strategyId}/backtests/${backtestId}`, { is_public: isPublic }).then((r) => r.data),
   getSymbols: (exchange = 'okx', marketType = 'spot'): Promise<string[]> =>
     client.get<string[]>('/admin/symbols', { params: { exchange, market_type: marketType } }).then((r) => r.data),
-  getBacktestCandles: (backtestId: number, symbol: string, timeframe = '1d'): Promise<OhlcvCandle[]> =>
-    client.get<OhlcvCandle[]>(`/admin/backtests/${backtestId}/candles`, { params: { symbol, timeframe } }).then((r) => r.data),
+  getBacktestCandles: (backtestId: number, symbol: string, timeframe = '1d', before?: number): Promise<OhlcvCandle[]> =>
+    client.get<OhlcvCandle[]>(`/admin/backtests/${backtestId}/candles`, { params: { symbol, timeframe, ...(before !== undefined ? { before } : {}) } }).then((r) => r.data),
 }
