@@ -3,6 +3,8 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 
 import { useLogin } from '../hooks/useAuth'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 interface LoginFormValues {
   email: string
@@ -29,66 +31,62 @@ export default function Login() {
       {/* Orange accent stripe on the right */}
       <div className="absolute right-0 top-0 bottom-0 w-1.5 bg-gradient-to-b from-[#f9a825] via-[#ff6f00] to-[#f9a825]" />
 
-      <div className="w-full max-w-sm px-6 py-10">
+      <div className="w-full max-w-[340px] px-4 py-8">
         {/* Header: title + logo */}
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold text-white leading-tight">Welcome Back</h1>
-          <img
-            src="/zenith-logo.svg"
-            alt="ZenithCrypto"
-            className="h-16 w-auto flex-shrink-0"
-          />
+          <h1 className="text-[28px] font-bold text-white leading-tight">Welcome Back</h1>
+          <img src="/zenith-logo.svg" alt="ZenithCrypto" className="h-20 w-auto flex-shrink-0" />
         </div>
 
         {loginMutation.error && (
-          <p className="text-red-400 text-xs mb-4 text-center">
+          <p className="text-destructive text-xs mb-4 text-center">
             {loginMutation.error.message ?? 'Login failed'}
           </p>
         )}
 
         <form onSubmit={handleSubmit(onSubmit)} noValidate>
           {/* Email field */}
-          <div className="mb-4">
+          <div className="mb-3">
             <div className="relative">
-              <input
+              <Input
                 id="email"
                 type="email"
                 placeholder="Email"
                 autoComplete="email"
-                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-4 py-3.5 text-white placeholder-gray-500 text-sm outline-none focus:border-[#6c47ff] focus:ring-1 focus:ring-[#6c47ff] transition-colors pr-11"
+                className="h-14 text-base pr-12 border-0 bg-[#1c1c1e] placeholder:text-gray-500"
                 {...register('email', { required: 'Email is required' })}
               />
-              <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none">
-                <Mail size={16} />
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none">
+                <Mail size={18} />
               </span>
             </div>
             {errors.email && (
-              <p className="text-red-400 text-xs mt-1 ml-1">{errors.email.message}</p>
+              <p className="text-destructive text-xs mt-1 ml-1">{errors.email.message}</p>
             )}
           </div>
 
           {/* Password field */}
-          <div className="mb-3">
+          <div className="mb-2">
             <div className="relative">
-              <input
+              <Input
                 id="password"
                 type={showPw ? 'text' : 'password'}
                 placeholder="Password"
                 autoComplete="current-password"
-                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-4 py-3.5 text-white placeholder-gray-500 text-sm outline-none focus:border-[#6c47ff] focus:ring-1 focus:ring-[#6c47ff] transition-colors pr-11"
+                className="h-14 text-base pr-12 border-0 bg-[#1c1c1e] placeholder:text-gray-500"
                 {...register('password', { required: 'Password is required' })}
               />
               <button
                 type="button"
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
                 onClick={() => setShowPw((p) => !p)}
                 aria-label={showPw ? 'Hide password' : 'Show password'}
               >
-                {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
             {errors.password && (
-              <p className="text-red-400 text-xs mt-1 ml-1">{errors.password.message}</p>
+              <p className="text-destructive text-xs mt-1 ml-1">{errors.password.message}</p>
             )}
           </div>
 
@@ -130,23 +128,25 @@ export default function Login() {
                 )}
               </div>
             </label>
-            <label htmlFor="agree" className="text-gray-400 text-xs leading-relaxed cursor-pointer">
+            <label htmlFor="agree" className="text-gray-300 text-xs leading-relaxed cursor-pointer">
               By logging in, you confirm that you have read, understood, and fully agree to the
               terms under{' '}
-              <a href="#" className="text-[#42a5f5] no-underline hover:underline">
+              <a href="#" className="text-[#42a5f5] no-underline hover:underline font-medium">
                 CoinTech2u&apos;s User Agreement and Authorization Consent
               </a>
             </label>
           </div>
 
           {/* Log In button */}
-          <button
+          <Button
             type="submit"
+            variant="secondary"
+            size="lg"
             disabled={loginMutation.isPending || !agreed}
-            className="w-full py-3.5 rounded-full bg-[#3a3a3a] text-gray-300 text-sm font-medium tracking-wide transition-all hover:bg-[#4a4a4a] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full rounded-full text-gray-300"
           >
             {loginMutation.isPending ? 'Signing in…' : 'Log In'}
-          </button>
+          </Button>
         </form>
       </div>
     </div>
