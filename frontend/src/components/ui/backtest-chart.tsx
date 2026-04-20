@@ -195,21 +195,25 @@ export function BacktestChart({ backtestId, symbol, orders, height = 420 }: Back
     chartRef.current = chart
 
     chart.setStyles(CHART_STYLES)
-    chart.setSymbol({ ticker: symbol, pricePrecision: 2, volumePrecision: 6 })
-    chart.setPeriod(parsePeriod(timeframe))
 
+    // setDataLoader must be registered before setSymbol/setPeriod so the
+    // initial load fires correctly when setPeriod triggers _processDataLoad.
     chart.setDataLoader({
       getBars: async ({ type, timestamp, period, callback }) => {
         const tf = periodToTF(period)
-        const before = type === 'backward' && timestamp != null ? timestamp : undefined
+        // 'forward' = user scrolled left → load candles BEFORE the oldest visible timestamp
+        const before = type === 'forward' && timestamp != null ? timestamp : undefined
         try {
           const candles = await adminApi.getBacktestCandles(backtestId, symbol, tf, before)
-          callback(candles as KLineData[], { backward: candles.length >= PAGE_SIZE })
+          callback(candles as KLineData[], { forward: candles.length >= PAGE_SIZE })
         } catch {
-          callback([], { backward: false })
+          callback([], { forward: false })
         }
       },
     })
+
+    chart.setSymbol({ ticker: symbol, pricePrecision: 2, volumePrecision: 6 })
+    chart.setPeriod(parsePeriod(timeframe))
 
     addOrderOverlays(chart, orders, symbol)
 
