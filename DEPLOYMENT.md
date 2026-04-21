@@ -1,15 +1,15 @@
-# 🚀 Railway Deployment Guide
+# 🚀 Deployment Guide
 
-This guide walks you through deploying **Zenith** to [Railway](https://railway.app) using **Railway Auto Deploy** — **no local tools required**.
+This guide covers deploying **Zenith** to [Railway](https://railway.app) (API + frontend) and the **Trading Worker** to a dedicated [Hetzner](https://hetzner.com) VPS.
 
-Everything is configured through the Railway dashboard and GitHub repository settings.
+Everything is configured through the Railway dashboard, GitHub repository settings, and a single VPS.
 
 ---
 
 ## Table of Contents
 
 1. [Environments overview](#1-environments-overview)
-2. [Architecture on Railway](#2-architecture-on-railway)
+2. [Architecture overview](#2-architecture-overview)
 3. [Step 1 — Create Railway projects (dashboard)](#3-step-1--create-railway-projects-dashboard)
 4. [Step 2 — Configure environment variables in Railway](#4-step-2--configure-environment-variables-in-railway)
 5. [Step 3 — Enable Railway Auto Deploy](#5-step-3--enable-railway-auto-deploy)
@@ -32,20 +32,24 @@ Each Railway project connects directly to this repository. Railway Auto Deploy w
 
 ---
 
-## 2. Architecture on Railway
-
-Each Railway project (dev and production) contains the same three services:
+## 2. Architecture overview
 
 ```
-Railway Project: zenith-prod  (or zenith-dev)
-├── Service: postgres   ← Managed PostgreSQL (Railway plugin)
-├── Service: backend    ← Python / FastAPI  (./backend/Dockerfile)
-└── Service: frontend   ← React / nginx     (./frontend/Dockerfile)
+Railway (Singapore region)          Hetzner SGP1 VPS (~€5/mo)
+├── Service: postgres   ◄───────────── Trading Worker (direct DB connection)
+├── Service: backend                        ├── fixed public IP → whitelist on exchanges
+└── Service: frontend                       └── runs market_listener_loop
 ```
 
-The **backend** connects to **postgres** via `DATABASE_URL`, which Railway injects automatically when the services are linked.
+The **trading worker** runs exclusively on the Hetzner VPS — not on Railway.
+This gives it a **stable, known IP** for exchange API key whitelisting, while
+Railway handles the web API and frontend.
 
-The **frontend** nginx proxies all `/api/` calls to the backend using the `BACKEND_URL` variable you set below.
+The worker communicates via the shared PostgreSQL database:
+- **Reads**: strategies, running StrategyWorkers
+- **Writes**: trades, positions, P&L
+
+Auto-deploy is handled by GitHub Actions on every push to `main`.
 
 ---
 
@@ -282,3 +286,104 @@ Railway → Service → Deployments → Redeploy
 
 - Check each Railway service's **Source** settings and confirm the intended branch is selected.
 - A service only auto-deploys for the repository and branch currently connected in Railway.
+
+---
+
+## 11. Trading Worker — Hetzner VPS
+
+The trading worker runs the market-listener loop on a dedicated Hetzner server
+with a **fixed public IP**, which you whitelist on each exchange.
+
+### 11.1 One-time Hetzner server setup
+
+1. Create a **Hetzner CX22** (or larger) in **SGP1** (Singapore).
+2. Note the server's **public IPv4** — add this IP to every exchange API key you create.
+3. SSH in as root and run:
+
+```bash
+# Install Docker
+curl -fsSL https://get.docker.com | sh
+
+# Create the worker directory and drop in the compose file
+mkdir -p /opt/zenith-worker
+cd /opt/zenith-worker
+
+# Copy worker/docker-compose.yml from the repository
+# (or paste its contents manually)
+
+# Create .env from the example and fill in values
+cp .env.example .env
+nano .env
+```
+
+4. Set these values in `/opt/zenith-worker/.env`:
+
+| Variable | Where to find it |
+|----------|-----------------|
+| `DATABASE_URL` | Railway dashboard → **postgres** service → **Variables** → `DATABASE_URL` (public URL) |
+| `SECRET_KEY` | Same value set on the Railway **BackEnd** service |
+| `MARKET_POLL_INTERVAL` | `60` (seconds) — adjust as needed |
+
+### 11.2 Add GitHub secrets
+
+In **GitHub → Settings → Secrets and variables → Actions**, add:
+
+| Secret | Value |
+|--------|-------|
+| `HETZNER_HOST` | Hetzner server public IPv4 |
+| `HETZNER_USER` | `root` (or your deploy user) |
+| `HETZNER_SSH_KEY` | Private SSH key that matches a key authorized on the server |
+| `GHCR_PAT` | GitHub Personal Access Token with **`read:packages`** scope (used by the VPS to pull images from ghcr.io) |
+
+> **Tip:** Generate `GHCR_PAT` at [github.com/settings/tokens](https://github.com/settings/tokens) → Fine-grained token → **Read** access to Packages.
+
+### 11.3 Auto-deploy behaviour
+
+```
+Push to main
+     │
+     ▼
+GitHub Actions: deploy-worker.yml
+     ├── 1. Build Docker image  (context: ./backend, file: worker/Dockerfile)
+     ├── 2. Push to ghcr.io/livectar/zenith-worker:latest + :<git-sha>
+     └── 3. SSH → /opt/zenith-worker
+              ├── docker compose pull
+              ├── docker compose up -d --remove-orphans
+              └── docker image prune -f
+```
+
+Deploys are **queued** (not cancelled) — a new push waits for the current deploy to finish.
+
+### 11.4 Manual worker commands
+
+```bash
+# SSH into Hetzner
+ssh root@<HETZNER_HOST>
+cd /opt/zenith-worker
+
+# View live logs
+docker compose logs -f
+
+# Restart worker
+docker compose restart
+
+# Stop worker
+docker compose down
+
+# Pull latest image manually
+docker compose pull && docker compose up -d
+```
+
+### 11.5 Verify the worker is running
+
+```bash
+docker compose ps          # should show "running"
+docker compose logs --tail 20
+```
+
+A healthy worker logs a line like:
+
+```
+INFO app.workers.market_listener — Market listener orchestrator started. Poll interval: 60s
+```
+

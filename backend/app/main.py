@@ -9,7 +9,6 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.user import ADMIN_ROLE, User
 from app.workers.blockchain_listener import blockchain_listener_loop
-from app.workers.market_listener import market_listener_loop
 
 log = logging.getLogger(__name__)
 
@@ -54,12 +53,11 @@ def _promote_configured_admin() -> None:
 async def startup_event():
     """Launch background workers after migrations have been applied."""
     _promote_configured_admin()
-    asyncio.create_task(market_listener_loop())
     if settings.EVM_PAYMENTS_ENABLED:
         asyncio.create_task(blockchain_listener_loop())
-        log.info("Background workers started: market_listener, blockchain_listener")
+        log.info("Background workers started: blockchain_listener")
     else:
-        log.info("Background workers started: market_listener")
+        log.info("EVM payments disabled — no background workers started on API server")
 
 
 @app.get("/health")
