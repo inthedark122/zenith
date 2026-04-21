@@ -15,4 +15,7 @@ export const authApi = {
 
   register: (payload: Record<string, string>): Promise<AuthResponse> =>
     client.post<AuthResponse>('/auth/register', payload).then((r) => r.data),
+
+  refresh: (): Promise<AuthResponse> =>
+    client.post<AuthResponse>('/auth/refresh').then((r) => r.data),
 }

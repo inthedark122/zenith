@@ -14,6 +14,7 @@ import Trading from './pages/Trading'
 import UserCenter from './pages/UserCenter'
 import Wallets from './pages/Wallets'
 import useAuthStore from './store/authStore'
+import { useSessionRefresh } from './hooks/useAuth'
 
 function PrivateRoute({ children }: { children: ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -26,6 +27,8 @@ function AdminRoute({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
+  useSessionRefresh()
+
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/home" replace />} />

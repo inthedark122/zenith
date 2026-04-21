@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 
@@ -48,4 +49,58 @@ export function useRegister() {
       navigate('/home')
     },
   })
+}
+
+const REFRESH_INTERVAL_MS = 60 * 60 * 1000 // 1 hour
+
+/**
+ * Tracks user activity and refreshes the JWT every hour while the user is active.
+ * If the user has been inactive for a full 24-hour token lifetime the token expires
+ * and they are logged out naturally on the next request.
+ */
+export function useSessionRefresh() {
+  const token = useAuthStore((s) => s.token)
+  const updateToken = useAuthStore((s) => s.updateToken)
+  const logout = useAuthStore((s) => s.logout)
+  const lastActivityRef = useRef<number>(Date.now())
+  const throttleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (!token) return
+
+    const recordActivity = () => {
+      if (!throttleRef.current) {
+        lastActivityRef.current = Date.now()
+        throttleRef.current = setTimeout(() => {
+          throttleRef.current = null
+        }, 60_000)
+      }
+    }
+
+    window.addEventListener('click', recordActivity, { passive: true })
+    window.addEventListener('keydown', recordActivity, { passive: true })
+    window.addEventListener('mousemove', recordActivity, { passive: true })
+    window.addEventListener('scroll', recordActivity, { passive: true })
+
+    const interval = setInterval(async () => {
+      const idleMs = Date.now() - lastActivityRef.current
+      if (idleMs < REFRESH_INTERVAL_MS) {
+        try {
+          const data = await authApi.refresh()
+          updateToken(data.access_token)
+        } catch {
+          logout()
+        }
+      }
+    }, REFRESH_INTERVAL_MS)
+
+    return () => {
+      window.removeEventListener('click', recordActivity)
+      window.removeEventListener('keydown', recordActivity)
+      window.removeEventListener('mousemove', recordActivity)
+      window.removeEventListener('scroll', recordActivity)
+      clearInterval(interval)
+      if (throttleRef.current) clearTimeout(throttleRef.current)
+    }
+  }, [token, updateToken, logout])
 }

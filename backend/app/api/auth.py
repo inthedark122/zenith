@@ -82,6 +82,13 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     return Token(access_token=token, user=UserResponse.model_validate(user))
 
 
+@router.post("/refresh", response_model=Token)
+def refresh(current_user: User = Depends(get_current_user)):
+    """Issue a fresh 24-hour token for an authenticated user."""
+    token = create_access_token({"sub": str(current_user.id)})
+    return Token(access_token=token, user=UserResponse.model_validate(current_user))
+
+
 @router.get("/me", response_model=UserResponse)
 def me(current_user: User = Depends(get_current_user)):
     return current_user
