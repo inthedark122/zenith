@@ -1,6 +1,6 @@
 services:
   worker:
-    image: ghcr.io/livectar/zenith-worker:latest
+    image: ${WORKER_IMAGE}
     restart: unless-stopped
     env_file: .env
     logging:

@@ -289,101 +289,159 @@ Railway → Service → Deployments → Redeploy
 
 ---
 
-## 11. Trading Worker — Hetzner VPS
+---
 
-The trading worker runs the market-listener loop on a dedicated Hetzner server
-with a **fixed public IP**, which you whitelist on each exchange.
+## 11. Trading Worker — GCP Compute Engine
 
-### 11.1 One-time Hetzner server setup
+The trading worker runs exclusively on a GCP Compute Engine VM in `asia-southeast1`
+(Singapore). All outbound traffic exits through a **single reserved static IP** via
+Cloud NAT — scale to multiple VMs later without asking users to update their API keys.
 
-1. Create a **Hetzner CX22** (or larger) in **SGP1** (Singapore).
-2. Note the server's **public IPv4** — add this IP to every exchange API key you create.
-3. SSH in as root and run:
-
-```bash
-# Install Docker
-curl -fsSL https://get.docker.com | sh
-
-# Create the worker directory and drop in the compose file
-mkdir -p /opt/zenith-worker
-cd /opt/zenith-worker
-
-# Copy worker/docker-compose.yml from the repository
-# (or paste its contents manually)
-
-# Create .env from the example and fill in values
-cp .env.example .env
-nano .env
+```
+GCP Project (asia-southeast1)
+├── Artifact Registry: zenith/   ← Docker images
+├── VPC: zenith-vpc (10.0.0.0/24)
+│   ├── Cloud Router + Cloud NAT → static IP: x.x.x.x  ← whitelist on exchanges
+│   └── Compute Engine: zenith-worker (e2-micro, no external IP)
+└── GitHub Actions → Workload Identity Federation (no stored keys)
 ```
 
-4. Set these values in `/opt/zenith-worker/.env`:
+### 11.1 One-time GCP infrastructure setup
+
+Prerequisites: `gcloud` CLI installed and authenticated (`gcloud auth login`).
+
+```bash
+export GCP_PROJECT_ID=your-project-id
+bash infra/gcp-setup.sh
+```
+
+The script creates the VPC, Cloud NAT, Artifact Registry repo, firewall rules, and
+the VM. It prints the **static outbound IP** — copy it before continuing.
+
+> **Whitelist this IP on every exchange API key you create. It never changes.**
+
+Then set up Workload Identity Federation (allows GitHub Actions to authenticate to
+GCP without storing any service account keys):
+
+```bash
+export GCP_PROJECT_ID=your-project-id
+export GITHUB_REPO=livectar/zenith
+bash infra/gcp-wif-setup.sh
+```
+
+### 11.2 Configure the VM environment
+
+SSH into the VM (no public IP — tunnels through Google IAP):
+
+```bash
+gcloud compute ssh zenith-worker \
+  --zone=asia-southeast1-b \
+  --tunnel-through-iap \
+  --project=YOUR_PROJECT_ID
+```
+
+Fill in the worker config:
+
+```bash
+nano /opt/zenith-worker/.env
+```
 
 | Variable | Where to find it |
 |----------|-----------------|
-| `DATABASE_URL` | Railway dashboard → **postgres** service → **Variables** → `DATABASE_URL` (public URL) |
+| `DATABASE_URL` | Railway dashboard → **postgres** service → **Variables** → `DATABASE_URL` (the public URL) |
 | `SECRET_KEY` | Same value set on the Railway **BackEnd** service |
 | `MARKET_POLL_INTERVAL` | `60` (seconds) — adjust as needed |
+| `WORKER_IMAGE` | Leave as-is; GitHub Actions updates this on every deploy |
 
-### 11.2 Add GitHub secrets
+### 11.3 Add GitHub Actions variables and secrets
 
-In **GitHub → Settings → Secrets and variables → Actions**, add:
+In **GitHub → Settings → Secrets and variables → Actions**:
+
+**Variables** (visible, not sensitive):
+
+| Variable | Value |
+|----------|-------|
+| `GCP_PROJECT_ID` | Your GCP project ID |
+| `GCP_REGION` | `asia-southeast1` |
+| `GCP_ZONE` | `asia-southeast1-b` |
+
+**Secrets** (printed at the end of `gcp-wif-setup.sh`):
 
 | Secret | Value |
 |--------|-------|
-| `HETZNER_HOST` | Hetzner server public IPv4 |
-| `HETZNER_USER` | `root` (or your deploy user) |
-| `HETZNER_SSH_KEY` | Private SSH key that matches a key authorized on the server |
-| `GHCR_PAT` | GitHub Personal Access Token with **`read:packages`** scope (used by the VPS to pull images from ghcr.io) |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | WIF provider resource name |
+| `GCP_DEPLOY_SERVICE_ACCOUNT` | Deploy SA email (`zenith-deploy-sa@...`) |
 
-> **Tip:** Generate `GHCR_PAT` at [github.com/settings/tokens](https://github.com/settings/tokens) → Fine-grained token → **Read** access to Packages.
-
-### 11.3 Auto-deploy behaviour
+### 11.4 Auto-deploy behaviour
 
 ```
 Push to main
      │
      ▼
 GitHub Actions: deploy-worker.yml
-     ├── 1. Build Docker image  (context: ./backend, file: worker/Dockerfile)
-     ├── 2. Push to ghcr.io/livectar/zenith-worker:latest + :<git-sha>
-     └── 3. SSH → /opt/zenith-worker
-              ├── docker compose pull
+     ├── 1. WIF auth (no stored keys — GitHub proves identity to GCP via OIDC)
+     ├── 2. Build Docker image (context: ./backend, file: worker/Dockerfile)
+     ├── 3. Push to Artifact Registry:
+     │       :latest  +  :<git-sha>  (immutable tag per commit)
+     ├── 4. SCP docker-compose.yml → VM via IAP
+     └── 5. SSH → VM via IAP:
+              ├── Update WORKER_IMAGE in .env to this commit's SHA tag
+              ├── docker compose pull  (VM pulls via its service account)
               ├── docker compose up -d --remove-orphans
               └── docker image prune -f
 ```
 
-Deploys are **queued** (not cancelled) — a new push waits for the current deploy to finish.
+Deploys are **queued** — a new push waits for the current deploy to finish.
+The exact image built by each commit is deployed to that commit — no race conditions.
 
-### 11.4 Manual worker commands
+### 11.5 Manual worker commands
 
 ```bash
-# SSH into Hetzner
-ssh root@<HETZNER_HOST>
+# SSH in
+gcloud compute ssh zenith-worker \
+  --zone=asia-southeast1-b --tunnel-through-iap --project=YOUR_PROJECT_ID
+
+# On the VM:
 cd /opt/zenith-worker
 
-# View live logs
-docker compose logs -f
-
-# Restart worker
-docker compose restart
-
-# Stop worker
-docker compose down
-
-# Pull latest image manually
-docker compose pull && docker compose up -d
+docker compose logs -f           # live logs
+docker compose ps                # status
+docker compose restart           # restart
+docker compose down              # stop
+docker compose pull && docker compose up -d   # pull latest manually
 ```
 
-### 11.5 Verify the worker is running
+### 11.6 Scaling to multiple workers
+
+Cloud NAT routes **all** VMs in the `zenith-vpc` subnet through the same static IP.
+To add a second worker VM:
+
+```bash
+gcloud compute instances create zenith-worker-2 \
+  --zone=asia-southeast1-b \
+  --machine-type=e2-micro \
+  --network=zenith-vpc \
+  --subnet=zenith-subnet \
+  --no-address \
+  --service-account=zenith-worker-sa@YOUR_PROJECT.iam.gserviceaccount.com \
+  --scopes=cloud-platform \
+  --tags=zenith-worker \
+  --metadata=enable-oslogin=TRUE \
+  --project=YOUR_PROJECT_ID
+```
+
+No IP whitelist changes needed — the new VM's outbound traffic also exits through
+the same static IP.
+
+### 11.7 Verify the worker is running
 
 ```bash
 docker compose ps          # should show "running"
 docker compose logs --tail 20
 ```
 
-A healthy worker logs a line like:
+A healthy worker logs:
 
 ```
 INFO app.workers.market_listener — Market listener orchestrator started. Poll interval: 60s
 ```
-
