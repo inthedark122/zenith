@@ -9,10 +9,11 @@
 # Creates:
 #   - Deploy service account (zenith-deploy-sa)
 #   - IAM roles on the deploy SA:
-#       roles/artifactregistry.writer   — push Docker images
-#       roles/compute.osAdminLogin      — SSH into the VM via OS Login
-#       roles/compute.viewer            — read VM metadata (needed for IAP SSH)
-#       roles/iap.tunnelResourceAccessor — open IAP SSH tunnel
+#       roles/artifactregistry.writer        — push Docker images
+#       roles/compute.osAdminLogin           — SSH into the VM via OS Login
+#       roles/compute.viewer                 — read VM metadata (needed for IAP SSH)
+#       roles/iap.tunnelResourceAccessor     — open IAP SSH tunnel
+#       roles/iam.serviceAccountUser on VM SA — required for gcloud compute scp/ssh
 #   - Workload Identity Pool + GitHub OIDC Provider
 #   - WIF binding: this repo's workflows can impersonate the deploy SA
 #
@@ -45,6 +46,7 @@ echo "GitHub repo : $GITHUB_REPO"
 echo ""
 
 DEPLOY_SA_EMAIL="${DEPLOY_SA_NAME}@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
+WORKER_SA_EMAIL="zenith-worker-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
 PROJECT_NUMBER=$(gcloud projects describe "$GCP_PROJECT_ID" --format="get(projectNumber)")
 
 # ── Deploy service account ────────────────────────────────────────────────────
@@ -83,6 +85,13 @@ gcloud projects add-iam-policy-binding "$GCP_PROJECT_ID" \
 gcloud projects add-iam-policy-binding "$GCP_PROJECT_ID" \
     --member="serviceAccount:${DEPLOY_SA_EMAIL}" \
     --role="roles/iap.tunnelResourceAccessor" \
+    --quiet
+
+# Act as the VM's service account (required for gcloud compute scp/ssh)
+gcloud iam service-accounts add-iam-policy-binding "$WORKER_SA_EMAIL" \
+    --member="serviceAccount:${DEPLOY_SA_EMAIL}" \
+    --role="roles/iam.serviceAccountUser" \
+    --project="$GCP_PROJECT_ID" \
     --quiet
 
 # ── Workload Identity Pool ────────────────────────────────────────────────────
