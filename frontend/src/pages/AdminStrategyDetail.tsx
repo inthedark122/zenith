@@ -573,6 +573,7 @@ export default function AdminStrategyDetail() {
                           )}
                         </div>
                         <BacktestChart
+                          key={selectedRun.id}
                           backtestId={selectedRun.id}
                           orders={selectedRun.orders}
                           symbol={chartSymbol}

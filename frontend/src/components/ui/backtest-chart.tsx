@@ -295,12 +295,10 @@ export function BacktestChart({ backtestId, symbol, orders, periodEnd, height = 
   const [timeframe, setTimeframe] = useState<TF>('1d')
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<Chart | null>(null)
-  // Incremented whenever the active timeframe changes so in-flight getBars
-  // responses from a previous period are silently discarded rather than
-  // overwriting the newly-loaded data (race condition prevention).
-  const loadVersionRef = useRef(0)
 
-  // Init chart — re-run only when backtestId or symbol changes.
+  // Re-init chart when backtestId, symbol, or timeframe changes.
+  // Re-creating on timeframe change ensures overlays and data loader are
+  // always in sync with the active period (setPeriod alone clears overlays).
   useEffect(() => {
     if (!containerRef.current) return
 
@@ -312,10 +310,8 @@ export function BacktestChart({ backtestId, symbol, orders, periodEnd, height = 
 
     // setDataLoader must be registered before setSymbol/setPeriod so the
     // initial load fires correctly when setPeriod triggers _processDataLoad.
-    let stale = false
     chart.setDataLoader({
       getBars: async ({ type, timestamp, period, callback }) => {
-        const expectedVersion = loadVersionRef.current
         const tf = periodToTF(period)
         let before: number | undefined
         if (type === 'forward' && timestamp != null) {
@@ -325,10 +321,8 @@ export function BacktestChart({ backtestId, symbol, orders, periodEnd, height = 
         }
         try {
           const candles = await adminApi.getBacktestCandles(backtestId, symbol, tf, before)
-          if (stale || loadVersionRef.current !== expectedVersion) return
           callback(candles as KLineData[], { forward: candles.length >= PAGE_SIZE })
         } catch {
-          if (stale || loadVersionRef.current !== expectedVersion) return
           callback([], { forward: false })
         }
       },
@@ -343,21 +337,11 @@ export function BacktestChart({ backtestId, symbol, orders, periodEnd, height = 
     ro.observe(containerRef.current!)
 
     return () => {
-      stale = true
       ro.disconnect()
       if (containerRef.current) dispose(containerRef.current)
       chartRef.current = null
     }
-  }, [backtestId, symbol]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Update period when timeframe toggle changes — no chart recreation needed.
-  // loadVersionRef is bumped first so any in-flight request for the previous
-  // period is discarded when it completes.
-  useEffect(() => {
-    if (!chartRef.current) return
-    loadVersionRef.current++
-    chartRef.current.setPeriod(parsePeriod(timeframe))
-  }, [timeframe])
+  }, [backtestId, symbol, timeframe]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-3">
