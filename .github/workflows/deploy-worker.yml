@@ -73,6 +73,16 @@ jobs:
         with:
           install_components: beta   # needed for IAP TCP tunneling
 
+      - name: Ensure /opt/zenith-worker exists on VM
+        run: |
+          gcloud compute ssh zenith-worker \
+            --zone=${{ vars.GCP_ZONE }} \
+            --project=${{ vars.GCP_PROJECT_ID }} \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no \
+            --quiet \
+            --command="sudo mkdir -p /opt/zenith-worker"
+
       - name: Copy docker-compose.yml to VM
         run: |
           gcloud compute scp worker/docker-compose.yml \
