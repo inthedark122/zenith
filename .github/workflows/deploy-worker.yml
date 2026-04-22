@@ -49,7 +49,7 @@ jobs:
             ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/zenith/zenith-worker:latest
             ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/zenith/zenith-worker:${{ github.sha }}
 
-  # ─── Deploy to GCP Compute Engine via IAP SSH ──────────────────────────────
+  # ─── Deploy to GCP Compute Engine (COS update-container) ──────────────────
   deploy:
     name: Deploy to GCP Compute Engine
     needs: build
@@ -59,9 +59,6 @@ jobs:
       id-token: write
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Authenticate to GCP (WIF)
         uses: google-github-actions/auth@v2
         with:
@@ -70,46 +67,11 @@ jobs:
 
       - name: Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
-        with:
-          install_components: beta   # needed for IAP TCP tunneling
 
-      - name: Ensure /opt/zenith-worker exists on VM
-        run: |
-          gcloud compute ssh zenith-worker \
-            --zone=${{ vars.GCP_ZONE }} \
-            --project=${{ vars.GCP_PROJECT_ID }} \
-            --tunnel-through-iap \
-            --strict-host-key-checking=no \
-            --quiet \
-            --command="sudo mkdir -p /opt/zenith-worker"
-
-      - name: Copy docker-compose.yml to VM
-        run: |
-          gcloud compute scp worker/docker-compose.yml \
-            zenith-worker:/opt/zenith-worker/docker-compose.yml \
-            --zone=${{ vars.GCP_ZONE }} \
-            --project=${{ vars.GCP_PROJECT_ID }} \
-            --tunnel-through-iap \
-            --strict-host-key-checking=no \
-            --quiet
-
-      - name: Deploy worker (pin to this commit's image)
+      - name: Update container image on VM
         run: |
           IMAGE="${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/zenith/zenith-worker:${{ github.sha }}"
-          gcloud compute ssh zenith-worker \
+          gcloud compute instances update-container zenith-worker \
             --zone=${{ vars.GCP_ZONE }} \
             --project=${{ vars.GCP_PROJECT_ID }} \
-            --tunnel-through-iap \
-            --strict-host-key-checking=no \
-            --quiet \
-            --command="
-              set -e
-              # Pin to the exact image built by this commit
-              sudo sed -i 's|^WORKER_IMAGE=.*|WORKER_IMAGE=$IMAGE|' /opt/zenith-worker/.env
-              sudo docker compose -f /opt/zenith-worker/docker-compose.yml \
-                --env-file /opt/zenith-worker/.env pull
-              sudo docker compose -f /opt/zenith-worker/docker-compose.yml \
-                --env-file /opt/zenith-worker/.env up -d --remove-orphans
-              sudo docker image prune -f
-            "
-
+            --container-image="$IMAGE"

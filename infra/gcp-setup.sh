@@ -8,8 +8,9 @@
 #   - Reserved static external IP (whitelist this on exchanges)
 #   - Cloud Router + Cloud NAT (all outbound traffic exits via the static IP)
 #   - VM service account (pulls images from Artifact Registry)
-#   - Firewall rules (IAP SSH ingress, HTTPS+PostgreSQL egress)
-#   - Compute Engine VM (e2-micro, no external IP, OS Login enabled)
+#   - Firewall rules (IAP SSH ingress for manual access, egress for exchanges)
+#   - Compute Engine VM using Container-Optimized OS — no Docker install needed,
+#     GCP runs the container directly from the Artifact Registry image.
 #
 # Usage:
 #   export GCP_PROJECT_ID=your-project-id
@@ -40,17 +41,16 @@ echo "Zone    : $ZONE"
 echo ""
 
 # ── Enable required APIs ──────────────────────────────────────────────────────
-echo "[1/9] Enabling GCP APIs..."
+echo "[1/8] Enabling GCP APIs..."
 gcloud services enable \
     compute.googleapis.com \
     artifactregistry.googleapis.com \
     iap.googleapis.com \
-    oslogin.googleapis.com \
     --project="$GCP_PROJECT_ID" \
     --quiet
 
 # ── Artifact Registry ─────────────────────────────────────────────────────────
-echo "[2/9] Creating Artifact Registry repository..."
+echo "[2/8] Creating Artifact Registry repository..."
 if ! gcloud artifacts repositories describe "$AR_REPO" \
         --location="$REGION" --project="$GCP_PROJECT_ID" &>/dev/null; then
     gcloud artifacts repositories create "$AR_REPO" \
@@ -64,7 +64,7 @@ else
 fi
 
 # ── VPC + subnet ─────────────────────────────────────────────────────────────
-echo "[3/9] Creating VPC and subnet..."
+echo "[3/8] Creating VPC and subnet..."
 if ! gcloud compute networks describe "$NETWORK" --project="$GCP_PROJECT_ID" &>/dev/null; then
     gcloud compute networks create "$NETWORK" \
         --subnet-mode=custom \
@@ -82,7 +82,7 @@ if ! gcloud compute networks subnets describe "$SUBNET" \
 fi
 
 # ── Static external IP ────────────────────────────────────────────────────────
-echo "[4/9] Reserving static external IP for Cloud NAT..."
+echo "[4/8] Reserving static external IP for Cloud NAT..."
 if ! gcloud compute addresses describe "$STATIC_IP_NAME" \
         --region="$REGION" --project="$GCP_PROJECT_ID" &>/dev/null; then
     gcloud compute addresses create "$STATIC_IP_NAME" \
@@ -100,7 +100,7 @@ echo "  ★  Whitelist this IP on all exchange API keys — it will never change
 echo ""
 
 # ── Cloud Router + NAT ────────────────────────────────────────────────────────
-echo "[5/9] Creating Cloud Router and Cloud NAT..."
+echo "[5/8] Creating Cloud Router and Cloud NAT..."
 if ! gcloud compute routers describe "$ROUTER_NAME" \
         --region="$REGION" --project="$GCP_PROJECT_ID" &>/dev/null; then
     gcloud compute routers create "$ROUTER_NAME" \
@@ -121,7 +121,7 @@ if ! gcloud compute routers nats describe "$NAT_NAME" \
 fi
 
 # ── VM service account ────────────────────────────────────────────────────────
-echo "[6/9] Creating VM service account..."
+echo "[6/8] Creating VM service account..."
 VM_SA_EMAIL="${VM_SA_NAME}@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
 if ! gcloud iam service-accounts describe "$VM_SA_EMAIL" \
         --project="$GCP_PROJECT_ID" &>/dev/null; then
@@ -129,7 +129,7 @@ if ! gcloud iam service-accounts describe "$VM_SA_EMAIL" \
         --display-name="Zenith Worker VM" \
         --project="$GCP_PROJECT_ID"
 fi
-# Grant read access to Artifact Registry
+# COS uses this SA to pull images from Artifact Registry automatically
 gcloud artifacts repositories add-iam-policy-binding "$AR_REPO" \
     --location="$REGION" \
     --member="serviceAccount:${VM_SA_EMAIL}" \
@@ -138,8 +138,8 @@ gcloud artifacts repositories add-iam-policy-binding "$AR_REPO" \
     --quiet
 
 # ── Firewall rules ────────────────────────────────────────────────────────────
-echo "[7/9] Creating firewall rules..."
-# Allow SSH only from Google IAP range (no public SSH exposure)
+echo "[7/8] Creating firewall rules..."
+# Allow SSH only from Google IAP range (for manual debugging)
 if ! gcloud compute firewall-rules describe zenith-allow-iap-ssh \
         --project="$GCP_PROJECT_ID" &>/dev/null; then
     gcloud compute firewall-rules create zenith-allow-iap-ssh \
@@ -161,64 +161,20 @@ if ! gcloud compute firewall-rules describe zenith-allow-egress \
         --allow=tcp \
         --destination-ranges="0.0.0.0/0" \
         --target-tags="zenith-worker" \
-        --description="Allow all outbound TCP (exchange APIs, DB, pkg installs)" \
+        --description="Allow all outbound TCP (exchange APIs, DB)" \
         --project="$GCP_PROJECT_ID" \
         --quiet
 fi
 
-# ── VM startup script ─────────────────────────────────────────────────────────
-echo "[8/9] Preparing VM startup script..."
-STARTUP_SCRIPT=$(cat << 'STARTUP'
-#!/bin/bash
-# Runs once on first boot. Subsequent reboots skip this.
-[ -f /var/lib/zenith-setup-done ] && exit 0
-set -e
-
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -y
-apt-get install -y --no-install-recommends \
-    docker.io docker-compose-plugin \
-    apt-transport-https ca-certificates gnupg curl
-
-systemctl enable docker
-systemctl start docker
-
-# Install gcloud CLI (needed for Artifact Registry Docker auth)
-curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
-    | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
-echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
-    > /etc/apt/sources.list.d/google-cloud-sdk.list
-apt-get update -y
-apt-get install -y google-cloud-cli
-
-# Configure Docker credential helper for Artifact Registry (root user)
-gcloud auth configure-docker asia-southeast1-docker.pkg.dev --quiet
-
-# Worker directory + placeholder env
-mkdir -p /opt/zenith-worker
-cat > /opt/zenith-worker/.env << 'ENV'
-# Fill in these values after setup — see DEPLOYMENT.md §11
-DATABASE_URL=
-SECRET_KEY=
-MARKET_POLL_INTERVAL=60
-WORKER_IMAGE=asia-southeast1-docker.pkg.dev/PLACEHOLDER/zenith/zenith-worker:latest
-ENV
-
-touch /var/lib/zenith-setup-done
-STARTUP
-)
-
-# ── Create VM ─────────────────────────────────────────────────────────────────
-echo "[9/9] Creating Compute Engine VM..."
+# ── Create VM (Container-Optimized OS) ───────────────────────────────────────
+# COS has Docker built-in. No startup script needed — GCP pulls and runs the
+# container image directly. Env vars are stored securely in VM metadata and
+# updated without SSH via: gcloud compute instances update-container
+echo "[8/8] Creating Compute Engine VM (Container-Optimized OS)..."
+INITIAL_IMAGE="$REGION-docker.pkg.dev/$GCP_PROJECT_ID/$AR_REPO/zenith-worker:latest"
 if ! gcloud compute instances describe "$VM_NAME" \
         --zone="$ZONE" --project="$GCP_PROJECT_ID" &>/dev/null; then
-    # Write startup script to a temp file to avoid issues with commas/newlines
-    # in inline --metadata values
-    STARTUP_SCRIPT_FILE=$(mktemp /tmp/zenith-startup-XXXXXX.sh)
-    echo "$STARTUP_SCRIPT" > "$STARTUP_SCRIPT_FILE"
-    trap "rm -f $STARTUP_SCRIPT_FILE" EXIT
-
-    gcloud compute instances create "$VM_NAME" \
+    gcloud compute instances create-with-container "$VM_NAME" \
         --zone="$ZONE" \
         --machine-type="e2-micro" \
         --network="$NETWORK" \
@@ -227,13 +183,17 @@ if ! gcloud compute instances describe "$VM_NAME" \
         --service-account="$VM_SA_EMAIL" \
         --scopes="cloud-platform" \
         --tags="zenith-worker" \
+        --image-family="cos-stable" \
+        --image-project="cos-cloud" \
+        --container-image="$INITIAL_IMAGE" \
+        --container-restart-policy="always" \
+        --container-env="DATABASE_URL=PLACEHOLDER,SECRET_KEY=PLACEHOLDER,MARKET_POLL_INTERVAL=60" \
         --metadata="enable-oslogin=TRUE" \
-        --metadata-from-file="startup-script=${STARTUP_SCRIPT_FILE}" \
         --boot-disk-size=20GB \
         --boot-disk-type=pd-standard \
         --project="$GCP_PROJECT_ID" \
         --quiet
-    echo "  VM created. Startup script is running (Docker install takes ~2 min)."
+    echo "  VM created with Container-Optimized OS."
 else
     echo "  VM already exists — skipping."
 fi
@@ -247,7 +207,14 @@ echo "  Artifact Registry  : $REGION-docker.pkg.dev/$GCP_PROJECT_ID/$AR_REPO"
 echo ""
 echo "Next steps:"
 echo "  1. Whitelist $STATIC_IP on all exchange API keys"
-echo "  2. Run: bash infra/gcp-wif-setup.sh  (GitHub Actions auth)"
-echo "  3. SSH in to fill out /opt/zenith-worker/.env:"
-echo "     gcloud compute ssh $VM_NAME --zone=$ZONE --tunnel-through-iap --project=$GCP_PROJECT_ID"
+echo "  2. Set real env vars on the VM (DATABASE_URL, SECRET_KEY):"
+echo ""
+echo "     gcloud compute instances update-container $VM_NAME \\"
+echo "       --zone=$ZONE \\"
+echo "       --container-env=\"DATABASE_URL=postgresql://...\" \\"
+echo "       --container-env=\"SECRET_KEY=your-secret\" \\"
+echo "       --project=$GCP_PROJECT_ID"
+echo ""
+echo "  3. Run: bash infra/gcp-wif-setup.sh  (GitHub Actions auth)"
 echo "  4. Add GitHub Actions variables/secrets — see DEPLOYMENT.md §11"
+

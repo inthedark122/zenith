@@ -9,11 +9,11 @@
 # Creates:
 #   - Deploy service account (zenith-deploy-sa)
 #   - IAM roles on the deploy SA:
-#       roles/artifactregistry.writer        — push Docker images
-#       roles/compute.osAdminLogin           — SSH into the VM via OS Login
-#       roles/compute.viewer                 — read VM metadata (needed for IAP SSH)
-#       roles/iap.tunnelResourceAccessor     — open IAP SSH tunnel
-#       roles/iam.serviceAccountUser on VM SA — required for gcloud compute scp/ssh
+#       roles/artifactregistry.writer     — push Docker images
+#       roles/compute.instanceAdmin.v1    — update-container (update VM metadata + restart)
+#
+# No SSH roles needed — COS deployment uses gcloud compute instances update-container,
+# which only requires compute API access, not SSH into the VM.
 #   - Workload Identity Pool + GitHub OIDC Provider
 #   - WIF binding: this repo's workflows can impersonate the deploy SA
 #
@@ -46,7 +46,6 @@ echo "GitHub repo : $GITHUB_REPO"
 echo ""
 
 DEPLOY_SA_EMAIL="${DEPLOY_SA_NAME}@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
-WORKER_SA_EMAIL="zenith-worker-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
 PROJECT_NUMBER=$(gcloud projects describe "$GCP_PROJECT_ID" --format="get(projectNumber)")
 
 # ── Deploy service account ────────────────────────────────────────────────────
@@ -69,29 +68,10 @@ gcloud artifacts repositories add-iam-policy-binding "$AR_REPO" \
     --project="$GCP_PROJECT_ID" \
     --quiet
 
-# SSH into VM via OS Login
+# Update container declaration on VM and restart it (update-container)
 gcloud projects add-iam-policy-binding "$GCP_PROJECT_ID" \
     --member="serviceAccount:${DEPLOY_SA_EMAIL}" \
-    --role="roles/compute.osAdminLogin" \
-    --quiet
-
-# Read VM instance metadata (required for gcloud compute ssh)
-gcloud projects add-iam-policy-binding "$GCP_PROJECT_ID" \
-    --member="serviceAccount:${DEPLOY_SA_EMAIL}" \
-    --role="roles/compute.viewer" \
-    --quiet
-
-# Open IAP SSH tunnel
-gcloud projects add-iam-policy-binding "$GCP_PROJECT_ID" \
-    --member="serviceAccount:${DEPLOY_SA_EMAIL}" \
-    --role="roles/iap.tunnelResourceAccessor" \
-    --quiet
-
-# Act as the VM's service account (required for gcloud compute scp/ssh)
-gcloud iam service-accounts add-iam-policy-binding "$WORKER_SA_EMAIL" \
-    --member="serviceAccount:${DEPLOY_SA_EMAIL}" \
-    --role="roles/iam.serviceAccountUser" \
-    --project="$GCP_PROJECT_ID" \
+    --role="roles/compute.instanceAdmin.v1" \
     --quiet
 
 # ── Workload Identity Pool ────────────────────────────────────────────────────
