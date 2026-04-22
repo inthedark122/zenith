@@ -4,6 +4,60 @@ import { useEffect, useRef, useState } from 'react'
 import { adminApi } from '@/api/admin'
 import { StrategyBacktestOrder } from '@/types'
 
+// ---- Indicator catalogue ----
+
+const OVERLAY_INDICATORS = new Set(['MA', 'EMA', 'SMA', 'BOLL', 'BBI', 'DMA', 'SAR', 'AVP'])
+
+const INDICATOR_GROUPS: { label: string; items: { name: string; label: string }[] }[] = [
+  {
+    label: 'Overlay',
+    items: [
+      { name: 'MA',   label: 'MA'         },
+      { name: 'EMA',  label: 'EMA'        },
+      { name: 'SMA',  label: 'SMA'        },
+      { name: 'BOLL', label: 'Bollinger'  },
+      { name: 'SAR',  label: 'SAR'        },
+      { name: 'BBI',  label: 'BBI'        },
+      { name: 'DMA',  label: 'DMA'        },
+      { name: 'AVP',  label: 'VWAP'       },
+    ],
+  },
+  {
+    label: 'Sub-pane',
+    items: [
+      { name: 'VOL',  label: 'Volume'     },
+      { name: 'MACD', label: 'MACD'       },
+      { name: 'RSI',  label: 'RSI'        },
+      { name: 'KDJ',  label: 'KDJ'        },
+      { name: 'WR',   label: 'Williams %R'},
+      { name: 'CCI',  label: 'CCI'        },
+      { name: 'BIAS', label: 'BIAS'       },
+      { name: 'DMI',  label: 'DMI'        },
+      { name: 'BRAR', label: 'BRAR'       },
+      { name: 'CR',   label: 'CR'         },
+      { name: 'EMV',  label: 'EMV'        },
+      { name: 'MTM',  label: 'Momentum'   },
+      { name: 'OBV',  label: 'OBV'        },
+      { name: 'PVT',  label: 'PVT'        },
+      { name: 'PSY',  label: 'PSY'        },
+      { name: 'ROC',  label: 'ROC'        },
+      { name: 'TRIX', label: 'TRIX'       },
+      { name: 'VR',   label: 'VR'         },
+      { name: 'AO',   label: 'AO'         },
+    ],
+  },
+]
+
+const LS_KEY = 'zenith-backtest-chart-indicators'
+
+function loadSavedIndicators(): string[] {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) ?? '[]') } catch { return [] }
+}
+
+function saveIndicators(names: string[]) {
+  localStorage.setItem(LS_KEY, JSON.stringify(names))
+}
+
 // ---- Custom triangle overlays (registered once) ----
 
 interface BuyMarkerData  { price: number; line2: string; line2Bg: string }
@@ -293,8 +347,24 @@ export function BacktestChart({ backtestId, symbol, orders, periodEnd, height = 
   ensureOverlays()
 
   const [timeframe, setTimeframe] = useState<TF>('1d')
+  const [activeIndicators, setActiveIndicators] = useState<string[]>(loadSavedIndicators)
+  const [indicatorPanelOpen, setIndicatorPanelOpen] = useState(false)
+
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<Chart | null>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  // Close indicator panel on outside click.
+  useEffect(() => {
+    if (!indicatorPanelOpen) return
+    function onPointerDown(e: PointerEvent) {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        setIndicatorPanelOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [indicatorPanelOpen])
 
   // Re-init chart when backtestId, symbol, or timeframe changes.
   // Re-creating on timeframe change ensures overlays and data loader are
@@ -333,6 +403,11 @@ export function BacktestChart({ backtestId, symbol, orders, periodEnd, height = 
 
     addOrderOverlays(chart, orders, symbol)
 
+    // Restore saved indicators.
+    for (const name of loadSavedIndicators()) {
+      chart.createIndicator(name, OVERLAY_INDICATORS.has(name))
+    }
+
     const ro = new ResizeObserver(() => chart.resize())
     ro.observe(containerRef.current!)
 
@@ -343,23 +418,112 @@ export function BacktestChart({ backtestId, symbol, orders, periodEnd, height = 
     }
   }, [backtestId, symbol, timeframe]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  function toggleIndicator(name: string) {
+    setActiveIndicators(prev => {
+      const isActive = prev.includes(name)
+      const next = isActive ? prev.filter(n => n !== name) : [...prev, name]
+      saveIndicators(next)
+      if (chartRef.current) {
+        if (isActive) {
+          chartRef.current.removeIndicator({ name })
+        } else {
+          chartRef.current.createIndicator(name, OVERLAY_INDICATORS.has(name))
+        }
+      }
+      return next
+    })
+  }
+
   return (
     <div className="space-y-3">
-      {/* Timeframe switcher */}
-      <div className="flex items-center gap-1.5">
-        {TIMEFRAMES.map((tf) => (
+      {/* Toolbar: timeframe switcher + indicator picker */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-1.5">
+          {TIMEFRAMES.map((tf) => (
+            <button
+              key={tf.value}
+              onClick={() => setTimeframe(tf.value)}
+              className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors cursor-pointer border ${
+                timeframe === tf.value
+                  ? 'border-[#6c47ff] bg-[#6c47ff]/20 text-foreground'
+                  : 'border-border text-muted-foreground hover:text-foreground hover:border-[#333]'
+              }`}
+            >
+              {tf.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Indicator picker */}
+        <div className="relative" ref={panelRef}>
           <button
-            key={tf.value}
-            onClick={() => setTimeframe(tf.value)}
-            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors cursor-pointer border ${
-              timeframe === tf.value
+            onClick={() => setIndicatorPanelOpen(v => !v)}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold transition-colors cursor-pointer border ${
+              indicatorPanelOpen || activeIndicators.length > 0
                 ? 'border-[#6c47ff] bg-[#6c47ff]/20 text-foreground'
                 : 'border-border text-muted-foreground hover:text-foreground hover:border-[#333]'
             }`}
           >
-            {tf.label}
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none" className="shrink-0">
+              <rect x="1" y="4.5" width="9" height="1.2" rx="0.6" fill="currentColor"/>
+              <rect x="1" y="1.5" width="9" height="1.2" rx="0.6" fill="currentColor"/>
+              <rect x="1" y="7.5" width="9" height="1.2" rx="0.6" fill="currentColor"/>
+              <circle cx="3.5" cy="5.1" r="1.2" fill="#111" stroke="currentColor" strokeWidth="0.9"/>
+              <circle cx="7"   cy="2.1" r="1.2" fill="#111" stroke="currentColor" strokeWidth="0.9"/>
+              <circle cx="5.5" cy="8.1" r="1.2" fill="#111" stroke="currentColor" strokeWidth="0.9"/>
+            </svg>
+            Indicators
+            {activeIndicators.length > 0 && (
+              <span className="ml-0.5 px-1 py-px bg-[#6c47ff] text-white rounded text-[9px] font-bold leading-none">
+                {activeIndicators.length}
+              </span>
+            )}
           </button>
-        ))}
+
+          {indicatorPanelOpen && (
+            <div className="absolute left-0 top-full mt-1.5 z-50 bg-[#1a1a1a] border border-border rounded-lg shadow-xl p-3 w-72">
+              <div className="flex flex-col gap-3">
+                {INDICATOR_GROUPS.map(group => (
+                  <div key={group.label}>
+                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+                      {group.label}
+                    </div>
+                    <div className="grid grid-cols-3 gap-1">
+                      {group.items.map(item => {
+                        const active = activeIndicators.includes(item.name)
+                        return (
+                          <button
+                            key={item.name}
+                            onClick={() => toggleIndicator(item.name)}
+                            className={`px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer border text-left ${
+                              active
+                                ? 'border-[#6c47ff] bg-[#6c47ff]/20 text-foreground'
+                                : 'border-border text-muted-foreground hover:text-foreground hover:border-[#333]'
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {activeIndicators.length > 0 && (
+                  <button
+                    onClick={() => {
+                      activeIndicators.forEach(name => chartRef.current?.removeIndicator({ name }))
+                      setActiveIndicators([])
+                      saveIndicators([])
+                    }}
+                    className="text-[11px] text-muted-foreground hover:text-foreground transition-colors text-left"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Chart canvas */}
@@ -395,4 +559,3 @@ export function BacktestChart({ backtestId, symbol, orders, periodEnd, height = 
     </div>
   )
 }
-
