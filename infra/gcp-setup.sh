@@ -212,6 +212,12 @@ STARTUP
 echo "[9/9] Creating Compute Engine VM..."
 if ! gcloud compute instances describe "$VM_NAME" \
         --zone="$ZONE" --project="$GCP_PROJECT_ID" &>/dev/null; then
+    # Write startup script to a temp file to avoid issues with commas/newlines
+    # in inline --metadata values
+    STARTUP_SCRIPT_FILE=$(mktemp /tmp/zenith-startup-XXXXXX.sh)
+    echo "$STARTUP_SCRIPT" > "$STARTUP_SCRIPT_FILE"
+    trap "rm -f $STARTUP_SCRIPT_FILE" EXIT
+
     gcloud compute instances create "$VM_NAME" \
         --zone="$ZONE" \
         --machine-type="e2-micro" \
@@ -222,7 +228,7 @@ if ! gcloud compute instances describe "$VM_NAME" \
         --scopes="cloud-platform" \
         --tags="zenith-worker" \
         --metadata="enable-oslogin=TRUE" \
-        --metadata="startup-script=${STARTUP_SCRIPT}" \
+        --metadata-from-file="startup-script=${STARTUP_SCRIPT_FILE}" \
         --boot-disk-size=20GB \
         --boot-disk-type=pd-standard \
         --project="$GCP_PROJECT_ID" \
