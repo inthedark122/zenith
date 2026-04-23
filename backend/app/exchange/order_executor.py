@@ -12,9 +12,10 @@ Swap amount calculation
     contracts           = floor(contracts / min_lot) * min_lot   (round to lot)
     if contracts < min_contracts: skip (log warning, return skipped=True)
 
-OKX one-way cross-margin params used for swap:
-    open:  {'tdMode': 'cross'}
-    close: {'tdMode': 'cross', 'reduceOnly': True}
+OKX one-way isolated-margin params used for swap (isolated draws from account
+balance directly, avoiding the cross-margin pool issue):
+    open:  {'tdMode': 'isolated', 'posSide': 'net'}
+    close: {'tdMode': 'isolated', 'posSide': 'net', 'reduceOnly': True}
 
 Spot markets use quoteOrderQty to spend a fixed USDT amount.
 """
@@ -88,10 +89,17 @@ def _calc_swap_contracts(
     contracts = math.floor(raw_contracts / lot) * lot
     contracts = round(contracts, amount_precision)
 
+    log.info(
+        "Swap %s: margin=%.2f lev=%d price=%.6f contract_size=%.4f → "
+        "%.4f raw contracts → %.4f (min=%.4f lot=%.6f)",
+        symbol, usdt_margin, leverage, entry_price, contract_size,
+        raw_contracts, contracts, min_amount, lot,
+    )
+
     if contracts < min_amount:
         log.warning(
-            "Swap %s: calculated %.6f contracts < min %.6f (margin=%.2f, lev=%d, price=%.4f) — skipping",
-            symbol, contracts, min_amount, usdt_margin, leverage, entry_price,
+            "Swap %s: calculated %.6f contracts < min %.6f — skipping",
+            symbol, contracts, min_amount,
         )
         return contracts, True
 
@@ -129,13 +137,17 @@ def open_long_position(
 
     try:
         if market_type == "swap":
-            # Set leverage before placing the order
+            # Use isolated margin — draws from account balance directly.
+            # Cross margin requires a separate margin pool which may be empty.
             try:
-                exchange.set_leverage(leverage, symbol, {"mgnMode": "cross"})
+                exchange.set_leverage(
+                    leverage, symbol,
+                    {"mgnMode": "isolated", "posSide": "net"},
+                )
             except Exception as exc:
                 log.warning("Could not set leverage for %s: %s", symbol, exc)
 
-            # Fetch current price if needed for contract calculation
+            # Fetch current price for contract calculation
             ticker = exchange.fetch_ticker(symbol)
             entry_price = float(ticker["last"] or ticker["close"])
 
@@ -147,8 +159,9 @@ def open_long_position(
                 result["contracts"] = contracts
                 return result
 
-            order = exchange.create_market_buy_order(
-                symbol, contracts, params={"tdMode": "cross"}
+            order = exchange.create_order(
+                symbol, "market", "buy", contracts, None,
+                params={"tdMode": "isolated", "posSide": "net"},
             )
 
         else:  # spot
@@ -193,8 +206,9 @@ def close_long_position(
 
     try:
         if market_type == "swap":
-            order = exchange.create_market_sell_order(
-                symbol, contracts, params={"tdMode": "cross", "reduceOnly": True}
+            order = exchange.create_order(
+                symbol, "market", "sell", contracts, None,
+                params={"tdMode": "isolated", "posSide": "net", "reduceOnly": True},
             )
         else:
             order = exchange.create_market_sell_order(symbol, contracts)
