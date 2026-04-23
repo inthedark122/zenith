@@ -23,7 +23,7 @@ set -euo pipefail
 : "${GCP_PROJECT_ID:?Set GCP_PROJECT_ID before running this script}"
 
 REGION="asia-southeast1"
-ZONE="asia-southeast1-b"
+ZONE="asia-southeast1-c"
 NETWORK="zenith-vpc"
 SUBNET="zenith-subnet"
 SUBNET_RANGE="10.0.0.0/24"
