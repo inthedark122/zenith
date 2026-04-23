@@ -34,6 +34,7 @@ export interface Exchange {
   api_key?: string
   is_default: boolean
   status: 'pending' | 'verified' | 'invalid'
+  last_error?: string | null
   balance_usdt_free?: number | null
   balance_usdt_total?: number | null
   balance_updated_at?: string | null

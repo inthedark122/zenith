@@ -91,6 +91,7 @@ async def _process_task(task_id: int) -> None:
         )
         if exc_row:
             exc_row.status = EXCHANGE_STATUS_VERIFIED if ok else EXCHANGE_STATUS_INVALID
+            exc_row.last_error = None if ok else error
             if ok and balance is not None:
                 exc_row.balance_usdt_free = balance
                 exc_row.balance_usdt_total = balance

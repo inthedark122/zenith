@@ -43,6 +43,7 @@ class UserExchange(Base):
 
     # Worker-managed validation & balance cache
     status = Column(String, nullable=False, default=EXCHANGE_STATUS_PENDING)
+    last_error = Column(String, nullable=True)   # last validation/sync error message
     balance_usdt_free = Column(Float, nullable=True)
     balance_usdt_total = Column(Float, nullable=True)
     balance_updated_at = Column(DateTime, nullable=True)

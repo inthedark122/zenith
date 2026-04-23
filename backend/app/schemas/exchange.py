@@ -37,6 +37,7 @@ class UserExchangeResponse(BaseModel):
     label: Optional[str]
     is_default: bool
     status: str
+    last_error: Optional[str] = None
     balance_usdt_free: Optional[float] = None
     balance_usdt_total: Optional[float] = None
     balance_updated_at: Optional[datetime] = None

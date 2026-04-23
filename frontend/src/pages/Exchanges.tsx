@@ -59,7 +59,10 @@ function ExchangeCard({ exc, onDelete, deleteDisabled }: {
             )}
             {exc.status === 'invalid' && (
               <div className="text-destructive text-xs">
-                ⚠ Invalid credentials or IP not whitelisted ({WORKER_IP})
+                {exc.last_error
+                  ? `⚠ ${exc.last_error}`
+                  : `⚠ Validation failed — check credentials and ensure IP ${WORKER_IP} is whitelisted`
+                }
               </div>
             )}
             {hasCachedBalance && (
