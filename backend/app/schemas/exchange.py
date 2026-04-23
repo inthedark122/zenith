@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, field_validator
 
@@ -43,3 +43,14 @@ class UserExchangeResponse(BaseModel):
     #       from the response to avoid leaking credentials.
 
     model_config = {"from_attributes": True}
+
+
+class ExchangeAccountBalance(BaseModel):
+    label: str
+    usdt_free: float
+    usdt_total: float
+
+
+class ExchangeBalanceResponse(BaseModel):
+    accounts: List[ExchangeAccountBalance]
+    error: Optional[str] = None

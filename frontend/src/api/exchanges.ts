@@ -1,4 +1,4 @@
-import { AddExchangePayload, Exchange, SupportedExchangesResponse } from '../types'
+import { AddExchangePayload, Exchange, ExchangeBalance, SupportedExchangesResponse } from '../types'
 import client from './client'
 
 export const exchangesApi = {
@@ -10,4 +10,6 @@ export const exchangesApi = {
     client.post<Exchange>('/exchanges', payload).then((r) => r.data),
   removeExchange: (exchangeId: string): Promise<void> =>
     client.delete(`/exchanges/${exchangeId}`).then((r) => r.data),
+  getBalance: (exchangeId: string): Promise<ExchangeBalance> =>
+    client.get<ExchangeBalance>(`/exchanges/${exchangeId}/balance`).then((r) => r.data),
 }

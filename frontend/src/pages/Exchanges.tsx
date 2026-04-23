@@ -1,15 +1,96 @@
-import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 
-import { useAddExchange, useExchanges, useRemoveExchange, useSupportedExchanges } from '../hooks/useExchanges'
-import { AddExchangePayload } from '../types'
+import { useAddExchange, useExchangeBalance, useExchanges, useRemoveExchange, useSupportedExchanges } from '../hooks/useExchanges'
+import { AddExchangePayload, Exchange } from '../types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+
+const UI_SUPPORTED_EXCHANGES = ['okx']
+
+function ExchangeCard({ exc, onDelete, deleteDisabled }: {
+  exc: Exchange
+  onDelete: (id: string) => void
+  deleteDisabled: boolean
+}) {
+  const { data: balanceData, isLoading: balanceLoading, refetch } = useExchangeBalance(exc.exchange_id)
+
+  return (
+    <Card className="mx-5 mb-3 p-4">
+      <div className="flex justify-between items-start">
+        <div className="flex-1 min-w-0">
+          <div className="text-foreground font-bold text-sm flex items-center gap-2">
+            {exc.exchange_id.toUpperCase()}
+            {exc.is_default && (
+              <Badge variant="default" className="text-[10px]">
+                DEFAULT
+              </Badge>
+            )}
+          </div>
+          {exc.label && (
+            <div className="text-muted-foreground text-xs mt-0.5">{exc.label}</div>
+          )}
+          <div className="text-muted-foreground text-xs mt-1">
+            Key: ••••{exc.api_key?.slice(-4) ?? '••••'}
+          </div>
+
+          {/* Balance section */}
+          <div className="mt-2 pt-2 border-t border-border">
+            {balanceLoading ? (
+              <div className="text-muted-foreground text-xs flex items-center gap-1.5">
+                <RefreshCw size={10} className="animate-spin" />
+                Loading balance…
+              </div>
+            ) : balanceData?.error ? (
+              <div className="text-destructive text-xs">
+                ⚠ {balanceData.error.length > 80 ? 'Invalid credentials or connection error' : balanceData.error}
+              </div>
+            ) : balanceData?.accounts && balanceData.accounts.length > 0 ? (
+              <div className="flex flex-wrap gap-3">
+                {balanceData.accounts.map((acc) => (
+                  <div key={acc.label}>
+                    <div className="text-muted-foreground text-[10px] uppercase tracking-wide">{acc.label}</div>
+                    <div className="text-foreground text-sm font-semibold">
+                      {acc.usdt_free.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
+                    </div>
+                    {acc.usdt_total !== acc.usdt_free && (
+                      <div className="text-muted-foreground text-[10px]">
+                        Total: {acc.usdt_total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={() => refetch()}
+                  className="text-muted-foreground hover:text-foreground transition-colors self-end mb-0.5"
+                  title="Refresh balance"
+                >
+                  <RefreshCw size={11} />
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <Button
+          variant="danger"
+          size="sm"
+          onClick={() => onDelete(exc.exchange_id)}
+          disabled={deleteDisabled}
+          className="ml-3 shrink-0"
+        >
+          <Trash2 size={14} />
+          Remove
+        </Button>
+      </div>
+    </Card>
+  )
+}
 
 export default function Exchanges() {
   const navigate = useNavigate()
@@ -23,7 +104,10 @@ export default function Exchanges() {
 
   const { data: exchanges = [] } = useExchanges()
   const { data: supportedData } = useSupportedExchanges()
-  const supported = supportedData?.exchanges ?? []
+  // Filter to UI-supported exchanges only (OKX)
+  const supported = (supportedData?.exchanges ?? []).filter((id) =>
+    UI_SUPPORTED_EXCHANGES.includes(id)
+  )
 
   const addExchange = useAddExchange()
   const removeExchange = useRemoveExchange()
@@ -63,35 +147,12 @@ export default function Exchanges() {
         </p>
       ) : (
         exchanges.map((exc) => (
-          <Card key={exc.exchange_id} className="mx-5 mb-3 p-4">
-            <div className="flex justify-between items-start">
-              <div>
-                <div className="text-foreground font-bold text-sm flex items-center gap-2">
-                  {exc.exchange_id.toUpperCase()}
-                  {exc.is_default && (
-                    <Badge variant="default" className="text-[10px]">
-                      DEFAULT
-                    </Badge>
-                  )}
-                </div>
-                {exc.label && (
-                  <div className="text-muted-foreground text-xs mt-0.5">{exc.label}</div>
-                )}
-                <div className="text-muted-foreground text-xs mt-1">
-                  Key: ••••{exc.api_key?.slice(-4) ?? '••••'}
-                </div>
-              </div>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => handleDelete(exc.exchange_id)}
-                disabled={removeExchange.isPending}
-              >
-                <Trash2 size={14} />
-                Remove
-              </Button>
-            </div>
-          </Card>
+          <ExchangeCard
+            key={exc.exchange_id}
+            exc={exc}
+            onDelete={handleDelete}
+            deleteDisabled={removeExchange.isPending}
+          />
         ))
       )}
 

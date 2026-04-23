@@ -18,6 +18,15 @@ export function useSupportedExchanges() {
   })
 }
 
+export function useExchangeBalance(exchangeId: string) {
+  return useQuery({
+    queryKey: ['exchanges', exchangeId, 'balance'],
+    queryFn: () => exchangesApi.getBalance(exchangeId),
+    staleTime: 60_000,
+    retry: false,
+  })
+}
+
 export function useAddExchange() {
   const queryClient = useQueryClient()
   return useMutation({

@@ -1,12 +1,19 @@
 from typing import List
 
+import ccxt
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user, get_db
 from app.models.exchange import SUPPORTED_EXCHANGES, UserExchange
 from app.models.user import User
-from app.schemas.exchange import UserExchangeCreate, UserExchangeResponse, UserExchangeUpdate
+from app.schemas.exchange import (
+    ExchangeBalanceResponse,
+    ExchangeAccountBalance,
+    UserExchangeCreate,
+    UserExchangeResponse,
+    UserExchangeUpdate,
+)
 
 router = APIRouter(prefix="/exchanges", tags=["exchanges"])
 
@@ -81,6 +88,54 @@ def add_exchange(
     db.commit()
     db.refresh(exc)
     return exc
+
+
+@router.get("/{exchange_id}/balance", response_model=ExchangeBalanceResponse)
+def get_exchange_balance(
+    exchange_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fetch live USDT balance from the connected exchange account."""
+    exc = (
+        db.query(UserExchange)
+        .filter(
+            UserExchange.user_id == current_user.id,
+            UserExchange.exchange_id == exchange_id,
+        )
+        .first()
+    )
+    if exc is None:
+        raise HTTPException(status_code=404, detail="Exchange connection not found")
+
+    exchange_cls = getattr(ccxt, exchange_id, None)
+    if exchange_cls is None:
+        raise HTTPException(status_code=400, detail=f"Unsupported exchange: {exchange_id}")
+
+    try:
+        client = exchange_cls({
+            "enableRateLimit": True,
+            "apiKey": exc.api_key,
+            "secret": exc.api_secret,
+            "password": exc.passphrase or "",
+        })
+
+        # OKX uses a single unified Trading account for spot + derivatives
+        if exchange_id == "okx":
+            raw = client.fetch_balance({"type": "trading"})
+            free = float(raw.get("free", {}).get("USDT", 0.0))
+            total = float(raw.get("total", {}).get("USDT", 0.0))
+            accounts = [ExchangeAccountBalance(label="Trading", usdt_free=free, usdt_total=total)]
+        else:
+            raw = client.fetch_balance()
+            free = float(raw.get("free", {}).get("USDT", 0.0))
+            total = float(raw.get("total", {}).get("USDT", 0.0))
+            accounts = [ExchangeAccountBalance(label="Spot", usdt_free=free, usdt_total=total)]
+
+        return ExchangeBalanceResponse(accounts=accounts)
+
+    except Exception as exc_err:
+        return ExchangeBalanceResponse(accounts=[], error=str(exc_err))
 
 
 @router.put("/{exchange_id}", response_model=UserExchangeResponse)

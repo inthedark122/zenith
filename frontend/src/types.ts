@@ -46,6 +46,17 @@ export interface AddExchangePayload {
   passphrase?: string
 }
 
+export interface ExchangeAccountBalance {
+  label: string
+  usdt_free: number
+  usdt_total: number
+}
+
+export interface ExchangeBalance {
+  accounts: ExchangeAccountBalance[]
+  error?: string | null
+}
+
 export interface StrategySettings {
   // MACD daily settings
   max_daily_margin_usd?: number
