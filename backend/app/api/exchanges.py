@@ -219,6 +219,50 @@ async def update_exchange(
     return exc
 
 
+@router.post("/{exchange_id}/revalidate", response_model=UserExchangeResponse)
+async def revalidate_exchange(
+    exchange_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Re-trigger credential validation through the trading worker."""
+    exc = (
+        db.query(UserExchange)
+        .filter(
+            UserExchange.user_id == current_user.id,
+            UserExchange.exchange_id == exchange_id,
+        )
+        .first()
+    )
+    if exc is None:
+        raise HTTPException(status_code=404, detail="Exchange connection not found")
+
+    exc.status = "pending"
+    exc.last_error = None
+    task = ExchangeValidationTask(
+        user_id=current_user.id,
+        exchange_id=exchange_id,
+        api_key=exc.api_key,
+        api_secret=exc.api_secret,
+        passphrase=exc.passphrase,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(exc)
+    db.refresh(task)
+
+    try:
+        await pg_notify("exchange_validation", str(task.id))
+        raw = await pg_wait_for_notification(f"validation_result_{task.id}", timeout=15)
+        if raw is not None:
+            db.refresh(exc)
+    except Exception:
+        pass
+
+    db.refresh(exc)
+    return exc
+
+
 @router.delete("/{exchange_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_exchange(
     exchange_id: str,

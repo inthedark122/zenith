@@ -43,6 +43,14 @@ export function useAddExchange() {
   })
 }
 
+export function useRevalidateExchange() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (exchangeId: string) => exchangesApi.revalidate(exchangeId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['exchanges'] }),
+  })
+}
+
 export function useRemoveExchange() {
   const queryClient = useQueryClient()
   return useMutation({

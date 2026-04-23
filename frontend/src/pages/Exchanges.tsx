@@ -1,9 +1,9 @@
-import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 
-import { useAddExchange, useExchanges, useRemoveExchange, useSupportedExchanges } from '../hooks/useExchanges'
+import { useAddExchange, useExchanges, useRemoveExchange, useRevalidateExchange, useSupportedExchanges } from '../hooks/useExchanges'
 import { AddExchangePayload, Exchange } from '../types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -29,6 +29,8 @@ function ExchangeCard({ exc, onDelete, deleteDisabled }: {
   onDelete: (id: string) => void
   deleteDisabled: boolean
 }) {
+  const revalidate = useRevalidateExchange()
+  const isRechecking = revalidate.isPending
   const hasCachedBalance = exc.status === 'verified' && exc.balance_usdt_free != null
   const updatedAt = exc.balance_updated_at
     ? new Date(exc.balance_updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -86,16 +88,28 @@ function ExchangeCard({ exc, onDelete, deleteDisabled }: {
           </div>
         </div>
 
-        <Button
-          variant="danger"
-          size="sm"
-          onClick={() => onDelete(exc.exchange_id)}
-          disabled={deleteDisabled}
-          className="ml-3 shrink-0"
-        >
-          <Trash2 size={14} />
-          Remove
-        </Button>
+        <div className="flex flex-col gap-2 ml-3 shrink-0">
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => onDelete(exc.exchange_id)}
+            disabled={deleteDisabled}
+          >
+            <Trash2 size={14} />
+            Remove
+          </Button>
+          {exc.status !== 'pending' && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => revalidate.mutate(exc.exchange_id)}
+              disabled={isRechecking}
+            >
+              <RefreshCw size={14} className={isRechecking ? 'animate-spin' : ''} />
+              {isRechecking ? 'Checking…' : 'Recheck'}
+            </Button>
+          )}
+        </div>
       </div>
     </Card>
   )

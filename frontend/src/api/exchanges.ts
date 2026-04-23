@@ -12,4 +12,6 @@ export const exchangesApi = {
     client.delete(`/exchanges/${exchangeId}`).then((r) => r.data),
   getBalance: (exchangeId: string): Promise<ExchangeBalance> =>
     client.get<ExchangeBalance>(`/exchanges/${exchangeId}/balance`).then((r) => r.data),
+  revalidate: (exchangeId: string): Promise<Exchange> =>
+    client.post<Exchange>(`/exchanges/${exchangeId}/revalidate`).then((r) => r.data),
 }
