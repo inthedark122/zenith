@@ -18,6 +18,9 @@ PLAN_COINS = {
     SubscriptionPlan.PRO: 3,
 }
 
+# Max concurrent bots per plan (same values, semantic alias)
+PLAN_MAX_BOTS = PLAN_COINS
+
 PLAN_PRICES = {
     SubscriptionPlan.STARTER: Decimal("15.00"),
     SubscriptionPlan.TRADER: Decimal("20.00"),
@@ -27,17 +30,7 @@ PLAN_PRICES = {
 
 class SubscriptionCreate(BaseModel):
     plan: SubscriptionPlan
-    coins: List[str]
-
-    @field_validator("coins")
-    @classmethod
-    def validate_coins_length(cls, v, info):
-        plan = info.data.get("plan")
-        if plan:
-            expected = PLAN_COINS[plan]
-            if len(v) != expected:
-                raise ValueError(f"Plan '{plan}' requires exactly {expected} coin(s)")
-        return v
+    coins: List[str] = []  # kept for API compat but no longer required or validated
 
 
 class SubscriptionResponse(BaseModel):

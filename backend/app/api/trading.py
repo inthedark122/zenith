@@ -271,19 +271,6 @@ def launch_worker(
             detail=f"Symbol(s) not in strategy: {', '.join(invalid_strategy)}",
         )
 
-    # subscription coin gate (only if subscription has coins configured)
-    sub_coins: List[str] = sub.coins or []
-    if sub_coins:
-        invalid_sub = [s for s in selected_symbols if s not in sub_coins]
-        if invalid_sub:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Symbol(s) not in your subscription: {', '.join(invalid_sub)}. "
-                    f"Your subscription includes: {', '.join(sub_coins)}"
-                ),
-            )
-
     # 5. Validate margin against cached balance
     margin = Decimal(str(payload.margin))
     if margin <= Decimal("0"):

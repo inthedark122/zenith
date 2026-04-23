@@ -74,14 +74,8 @@ function StrategyCard({
 
   const maxMargin = availableBalance != null ? availableBalance : 0
 
-  // Only show tokens that are in subscription.coins ∩ strategy.symbols
-  // If sub has no coins configured (legacy), show all strategy tokens
-  const subCoins = subscription?.coins ?? []
-  const strategySymbols = (strategy.symbols ?? []).map((s) => s.symbol)
-  const selectableSymbols =
-    subCoins.length > 0
-      ? strategySymbols.filter((sym) => subCoins.includes(sym))
-      : strategySymbols
+  // Show all tokens defined in the strategy — no subscription coin filter
+  const selectableSymbols = (strategy.symbols ?? []).map((s) => s.symbol)
 
   const toggleSymbol = (sym: string) => {
     setSelectedSymbols((prev) =>

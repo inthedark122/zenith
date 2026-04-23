@@ -220,7 +220,7 @@ export interface Subscription {
 
 export interface SubscribePayload {
   plan: string
-  coins: string[]
+  coins?: string[]
 }
 
 export interface AdminStrategyPayload {
