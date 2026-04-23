@@ -10,6 +10,7 @@ import asyncio
 import logging
 from datetime import datetime
 
+import app.models  # ensure all models registered before any query  # noqa: F401
 import ccxt
 
 from app.db.session import SessionLocal

@@ -34,6 +34,7 @@ from typing import Dict, Optional
 
 import ccxt
 
+import app.models  # ensure all models registered before any query  # noqa: F401
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.strategy import STRATEGY_DCA, STRATEGY_DCA_MACD_DAILY, Strategy

@@ -16,6 +16,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 
+import app.models  # ensure all models registered before any query  # noqa: F401
 import asyncpg
 import ccxt
 
