@@ -182,10 +182,17 @@ export default function AdminStrategyDetail() {
         symbols: strategy.symbols,
         leverage: strategy.leverage,
         rr_ratio: strategy.rr_ratio,
-        settings: {
-          max_daily_margin_usd: strategy.settings?.max_daily_margin_usd ?? 0,
-          max_daily_trades: strategy.settings?.max_daily_trades ?? 2,
-        },
+        settings: strategy.strategy === 'DCA'
+          ? {
+              amount_multiplier: strategy.settings?.amount_multiplier ?? 2,
+              step_percent: strategy.settings?.step_percent ?? 0.5,
+              max_orders: strategy.settings?.max_orders ?? 5,
+              take_profit_percent: strategy.settings?.take_profit_percent ?? 1.0,
+            }
+          : {
+              max_daily_margin_usd: strategy.settings?.max_daily_margin_usd ?? 0,
+              max_daily_trades: strategy.settings?.max_daily_trades ?? 2,
+            },
         is_active: strategy.is_active ?? true,
       })
     }
@@ -385,25 +392,48 @@ export default function AdminStrategyDetail() {
                 <Label>Risk : Reward</Label>
                 <Input type="number" step="0.1" value={form.rr_ratio} onChange={(e) => handleFieldChange('rr_ratio', Number(e.target.value))} className="mt-1" />
               </div>
-              <div>
-                <Label>Max daily trades</Label>
-                <Input
-                  type="number"
-                  value={form.settings.max_daily_trades ?? 2}
-                  onChange={(e) => handleFieldChange('settings', { ...form.settings, max_daily_trades: Number(e.target.value) })}
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <Label>Max daily margin (USDT)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={form.settings.max_daily_margin_usd ?? 0}
-                  onChange={(e) => handleFieldChange('settings', { ...form.settings, max_daily_margin_usd: Number(e.target.value) })}
-                  className="mt-1"
-                />
-              </div>
+              {form.strategy === 'DCA' ? (
+                <>
+                  <div>
+                    <Label>Amount Multiplier</Label>
+                    <Input type="number" step="0.1" value={form.settings.amount_multiplier ?? 2} onChange={(e) => handleFieldChange('settings', { ...form.settings, amount_multiplier: Number(e.target.value) })} className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>Step % (price drop)</Label>
+                    <Input type="number" step="0.01" value={form.settings.step_percent ?? 0.5} onChange={(e) => handleFieldChange('settings', { ...form.settings, step_percent: Number(e.target.value) })} className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>Max Orders</Label>
+                    <Input type="number" min={1} value={form.settings.max_orders ?? 5} onChange={(e) => handleFieldChange('settings', { ...form.settings, max_orders: Number(e.target.value) })} className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>Take Profit %</Label>
+                    <Input type="number" step="0.01" value={form.settings.take_profit_percent ?? 1.0} onChange={(e) => handleFieldChange('settings', { ...form.settings, take_profit_percent: Number(e.target.value) })} className="mt-1" />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <Label>Max daily trades</Label>
+                    <Input
+                      type="number"
+                      value={form.settings.max_daily_trades ?? 2}
+                      onChange={(e) => handleFieldChange('settings', { ...form.settings, max_daily_trades: Number(e.target.value) })}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label>Max daily margin (USDT)</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={form.settings.max_daily_margin_usd ?? 0}
+                      onChange={(e) => handleFieldChange('settings', { ...form.settings, max_daily_margin_usd: Number(e.target.value) })}
+                      className="mt-1"
+                    />
+                  </div>
+                </>
+              )}
             </div>
 
             <label className="flex items-center gap-2 text-sm text-foreground mt-4 cursor-pointer">

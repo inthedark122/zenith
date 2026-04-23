@@ -1,0 +1,188 @@
+"""
+DCA — strategy worker implementation.
+
+Strategy rules
+--------------
+- Symbols    : admin-configured list
+- Direction  : LONG only (spot / 1×)
+- Cycle      : one DCA cycle per symbol at a time
+    * Order #1 — opened immediately when no active cycle exists
+    * Order #N — opened when price drops ``step_percent``% from last entry
+    * Maximum ``max_orders`` orders per cycle
+    * Take profit when price ≥ weighted average entry × (1 + take_profit_percent / 100)
+    * When TP is hit all open orders in the cycle are closed as WIN
+    * After the cycle closes, a new one starts on the next poll tick
+
+Settings (from Strategy.settings JSON)
+---------------------------------------
+    amount_multiplier   — safety order amount = prev_amount × multiplier   (default 2.0)
+    step_percent        — % price drop from last entry to trigger next order (default 0.5)
+    max_orders          — max orders per cycle incl. initial order           (default 5)
+    take_profit_percent — TP % above weighted avg entry                      (default 1.0)
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import date
+from typing import Dict, Optional
+
+from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
+
+from app.models.trade import StrategyTrade, TradeStatus
+from app.models.worker import StrategyWorker
+from app.strategies.dca.strategy import (
+    calculate_avg_entry,
+    calculate_next_amount,
+    calculate_take_profit,
+)
+
+log = logging.getLogger(__name__)
+
+
+def run_for_worker(
+    worker: StrategyWorker,
+    latest_signals: Dict,        # unused — DCA needs no entry signal
+    current_prices: Dict[str, float],
+    db: Session,
+) -> None:
+    """
+    Evaluate the DCA strategy for a single running worker.
+
+    Steps per symbol
+    ----------------
+    1. Load all OPEN orders for this worker + symbol (current cycle).
+    2. If no open orders → start a new cycle (order #1 at market).
+    3. If open orders exist:
+       a. Recalculate avg entry and TP.
+       b. If current price ≥ TP → close all orders as WIN.
+       c. Else if price dropped ≥ step_percent from last entry
+          and order_count < max_orders → open next safety order.
+    """
+    strategy = worker.strategy
+    settings = strategy.settings or {}
+
+    amount_multiplier: float = float(settings.get("amount_multiplier", 2.0))
+    step_percent: float = float(settings.get("step_percent", 0.5))
+    max_orders: int = int(settings.get("max_orders", 5))
+    take_profit_percent: float = float(settings.get("take_profit_percent", 1.0))
+
+    for symbol in (strategy.symbols or []):
+        current_price = current_prices.get(symbol)
+        if current_price is None:
+            log.warning("Worker #%d: no price for %s — skipping", worker.id, symbol)
+            continue
+
+        open_orders = (
+            db.query(StrategyTrade)
+            .filter(
+                StrategyTrade.worker_id == worker.id,
+                StrategyTrade.symbol == symbol,
+                StrategyTrade.status == TradeStatus.OPEN,
+            )
+            .order_by(StrategyTrade.created_at.asc())
+            .all()
+        )
+        order_count = len(open_orders)
+
+        if order_count == 0:
+            # ── Start new DCA cycle ────────────────────────────────────────
+            initial_amount = float(worker.margin)
+            tp_price = calculate_take_profit(current_price, take_profit_percent)
+            trade = StrategyTrade(
+                user_id=worker.user_id,
+                worker_id=worker.id,
+                strategy_id=strategy.id,
+                symbol=symbol,
+                exchange=worker.exchange_id,
+                status=TradeStatus.OPEN,
+                trade_date=date.today(),
+                details={
+                    "dca_order_number": 1,
+                    "entry_price": str(current_price),
+                    "amount": str(initial_amount),
+                    "avg_entry_price": str(current_price),
+                    "take_profit_price": str(tp_price),
+                    "margin": str(initial_amount),
+                    "leverage": 1,
+                },
+            )
+            db.add(trade)
+            log.info(
+                "Worker #%d: DCA cycle started for %s @ %.4f "
+                "(order #1, $%.2f, TP=%.4f)",
+                worker.id, symbol, current_price, initial_amount, tp_price,
+            )
+            continue
+
+        # ── Active cycle: recalculate avg entry and TP ─────────────────────
+        entries = [
+            (float(t.details["entry_price"]), float(t.details["amount"]))
+            for t in open_orders
+        ]
+        avg_entry = calculate_avg_entry(entries)
+        tp_price = calculate_take_profit(avg_entry, take_profit_percent)
+
+        # ── Check take profit ──────────────────────────────────────────────
+        if current_price >= tp_price:
+            for t in open_orders:
+                t.status = TradeStatus.WIN
+            log.info(
+                "Worker #%d: DCA TP hit for %s @ %.4f "
+                "(avg_entry=%.4f, TP=%.4f, %d orders → WIN)",
+                worker.id, symbol, current_price, avg_entry, tp_price, order_count,
+            )
+            continue
+
+        # ── Check safety order trigger ────────────────────────────────────
+        if order_count >= max_orders:
+            continue
+
+        last_entry_price = float(open_orders[-1].details["entry_price"])
+        drop_pct = (last_entry_price - current_price) / last_entry_price * 100
+
+        if drop_pct < step_percent:
+            continue
+
+        # Open next safety order
+        prev_amount = float(open_orders[-1].details["amount"])
+        next_amount = calculate_next_amount(prev_amount, amount_multiplier)
+
+        new_avg_entry = calculate_avg_entry(entries + [(current_price, next_amount)])
+        new_tp_price = calculate_take_profit(new_avg_entry, take_profit_percent)
+
+        # Update TP on all existing open orders so the UI stays consistent
+        for t in open_orders:
+            t.details = {
+                **t.details,
+                "avg_entry_price": str(new_avg_entry),
+                "take_profit_price": str(new_tp_price),
+            }
+            flag_modified(t, "details")
+
+        trade = StrategyTrade(
+            user_id=worker.user_id,
+            worker_id=worker.id,
+            strategy_id=strategy.id,
+            symbol=symbol,
+            exchange=worker.exchange_id,
+            status=TradeStatus.OPEN,
+            trade_date=date.today(),
+            details={
+                "dca_order_number": order_count + 1,
+                "entry_price": str(current_price),
+                "amount": str(next_amount),
+                "avg_entry_price": str(new_avg_entry),
+                "take_profit_price": str(new_tp_price),
+                "margin": str(next_amount),
+                "leverage": 1,
+            },
+        )
+        db.add(trade)
+        log.info(
+            "Worker #%d: DCA safety order #%d for %s @ %.4f "
+            "(drop=%.2f%%, $%.2f, avg=%.4f, TP=%.4f)",
+            worker.id, order_count + 1, symbol, current_price,
+            drop_pct, next_amount, new_avg_entry, new_tp_price,
+        )

@@ -47,8 +47,14 @@ export interface AddExchangePayload {
 }
 
 export interface StrategySettings {
+  // MACD daily settings
   max_daily_margin_usd?: number
   max_daily_trades?: number
+  // DCA settings
+  amount_multiplier?: number
+  step_percent?: number
+  max_orders?: number
+  take_profit_percent?: number
 }
 
 export interface StrategyBacktestSymbolSummary {

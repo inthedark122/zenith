@@ -52,6 +52,8 @@ function StrategyCard({
     }
   }
 
+  const isDCA = strategy.strategy === 'DCA'
+
   const maxDailyMargin = strategy.settings?.max_daily_margin_usd ?? 0
   const maxDailyTrades = strategy.settings?.max_daily_trades ?? 2
   const maxMargin = maxDailyMargin > 0 ? Math.min(walletBalance, maxDailyMargin) : walletBalance
@@ -84,18 +86,37 @@ function StrategyCard({
           <div className="text-[#a78bfa] text-xs mt-0.5">{strategy.strategy}</div>
         </div>
         <div className="flex gap-3 text-xs text-muted-foreground">
-          <div className="text-center">
-            <div className="text-foreground font-semibold text-sm">{strategy.leverage}×</div>
-            <div>Leverage</div>
-          </div>
-          <div className="text-center">
-            <div className="text-foreground font-semibold text-sm">1:{strategy.rr_ratio}</div>
-            <div>R:R</div>
-          </div>
-          <div className="text-center">
-            <div className="text-foreground font-semibold text-sm">{maxDailyTrades}</div>
-            <div>Max/day</div>
-          </div>
+          {isDCA ? (
+            <>
+              <div className="text-center">
+                <div className="text-foreground font-semibold text-sm">{strategy.settings?.max_orders ?? 5}</div>
+                <div>Max orders</div>
+              </div>
+              <div className="text-center">
+                <div className="text-foreground font-semibold text-sm">{strategy.settings?.step_percent ?? 0.5}%</div>
+                <div>Step</div>
+              </div>
+              <div className="text-center">
+                <div className="text-foreground font-semibold text-sm">{strategy.settings?.take_profit_percent ?? 1.0}%</div>
+                <div>TP</div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-center">
+                <div className="text-foreground font-semibold text-sm">{strategy.leverage}×</div>
+                <div>Leverage</div>
+              </div>
+              <div className="text-center">
+                <div className="text-foreground font-semibold text-sm">1:{strategy.rr_ratio}</div>
+                <div>R:R</div>
+              </div>
+              <div className="text-center">
+                <div className="text-foreground font-semibold text-sm">{maxDailyTrades}</div>
+                <div>Max/day</div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -111,16 +132,30 @@ function StrategyCard({
         <p className="text-[#a78bfa] text-xs leading-relaxed">
           <strong className="text-[#c4b5fd]">How it works:</strong>
           <br />
-          • Worker runs automatically in the background
-          <br />
-          • D1 MACD bullish crossover → opens a Long trade
-          <br />
-          • Risk/Reward 1:{strategy.rr_ratio} · Worker auto-closes at TP or SL
-          <br />
-          • Max {maxDailyTrades} entries per day per symbol
-          {maxDailyMargin > 0 && (
+          {isDCA ? (
             <>
-              <br />• Max daily margin: ${maxDailyMargin}
+              • Worker opens an initial order immediately at market price
+              <br />
+              • Each {strategy.settings?.step_percent ?? 0.5}% price drop triggers a safety order ({strategy.settings?.amount_multiplier ?? 2}× larger)
+              <br />
+              • Max {strategy.settings?.max_orders ?? 5} orders per cycle · TP at avg entry +{strategy.settings?.take_profit_percent ?? 1.0}%
+              <br />
+              • All orders close as WIN when TP is reached
+            </>
+          ) : (
+            <>
+              • Worker runs automatically in the background
+              <br />
+              • D1 MACD bullish crossover → opens a Long trade
+              <br />
+              • Risk/Reward 1:{strategy.rr_ratio} · Worker auto-closes at TP or SL
+              <br />
+              • Max {maxDailyTrades} entries per day per symbol
+              {maxDailyMargin > 0 && (
+                <>
+                  <br />• Max daily margin: ${maxDailyMargin}
+                </>
+              )}
             </>
           )}
         </p>
@@ -243,16 +278,18 @@ function StrategyCard({
         )}
 
         <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={fetchSignal}
-            disabled={signalLoading}
-            className="text-[#a78bfa] border-[#6c47ff]"
-          >
-            {signalLoading ? '…' : '📊 Signal'}
-          </Button>
+          {!isDCA && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={fetchSignal}
+              disabled={signalLoading}
+              className="text-[#a78bfa] border-[#6c47ff]"
+            >
+              {signalLoading ? '…' : '📊 Signal'}
+            </Button>
+          )}
           <Button type="submit" size="sm" disabled={launchWorker.isPending} className="flex-1">
             {launchWorker.isPending ? 'Starting…' : '▶ Start Worker'}
           </Button>
@@ -267,7 +304,7 @@ function StrategyCard({
       )}
       {launchWorker.isSuccess && (
         <p className="text-success text-xs mt-1">
-          Worker started! It will open trades automatically when signals fire.
+          Worker started! It will open trades automatically{isDCA ? '.' : ' when signals fire.'}
         </p>
       )}
     </Card>

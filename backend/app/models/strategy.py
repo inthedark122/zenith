@@ -5,9 +5,9 @@ from sqlalchemy.orm import relationship
 
 from app.db.base import Base
 
-# The one strategy implementation available today
 STRATEGY_DCA_MACD_DAILY = "DCA_MACD_DAILY"
-SUPPORTED_STRATEGIES = [STRATEGY_DCA_MACD_DAILY]
+STRATEGY_DCA = "DCA"
+SUPPORTED_STRATEGIES = [STRATEGY_DCA_MACD_DAILY, STRATEGY_DCA]
 
 
 class Strategy(Base):

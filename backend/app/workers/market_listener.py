@@ -36,7 +36,7 @@ import ccxt
 
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.models.strategy import STRATEGY_DCA_MACD_DAILY, Strategy
+from app.models.strategy import STRATEGY_DCA, STRATEGY_DCA_MACD_DAILY, Strategy
 from app.models.worker import StrategyWorker, WorkerStatus
 from app.strategies.dca_macd_daily.strategy import (
     STRATEGY_NAME as DCA_MACD_DAILY_STRATEGY_NAME,
@@ -45,6 +45,7 @@ from app.strategies.dca_macd_daily.strategy import (
     signal_cache as dca_signal_cache,
 )
 from app.strategies.dca_macd_daily import worker as dca_macd_daily_worker
+from app.strategies.dca import worker as dca_worker
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ MARKET_POLL_INTERVAL: int = settings.MARKET_POLL_INTERVAL
 # Mapping from strategy identifier → worker module
 _STRATEGY_IMPL = {
     STRATEGY_DCA_MACD_DAILY: dca_macd_daily_worker,
+    STRATEGY_DCA: dca_worker,
 }
 
 # Source exchange for public market data
