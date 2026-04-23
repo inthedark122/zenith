@@ -13,9 +13,10 @@ Swap amount calculation
     if contracts < min_contracts: skip (log warning, return skipped=True)
 
 OKX one-way isolated-margin params used for swap (isolated draws from account
-balance directly, avoiding the cross-margin pool issue):
-    open:  {'tdMode': 'isolated', 'posSide': 'net'}
-    close: {'tdMode': 'isolated', 'posSide': 'net', 'reduceOnly': True}
+balance directly, avoiding the cross-margin pool issue). Do NOT pass posSide
+for one-way accounts — OKX rejects 'net' as an invalid value for isolated mode:
+    open:  {'tdMode': 'isolated'}
+    close: {'tdMode': 'isolated', 'reduceOnly': True}
 
 Spot markets use quoteOrderQty to spend a fixed USDT amount.
 """
@@ -142,7 +143,7 @@ def open_long_position(
             try:
                 exchange.set_leverage(
                     leverage, symbol,
-                    {"mgnMode": "isolated", "posSide": "net"},
+                    {"mgnMode": "isolated"},
                 )
             except Exception as exc:
                 log.warning("Could not set leverage for %s: %s", symbol, exc)
@@ -161,7 +162,7 @@ def open_long_position(
 
             order = exchange.create_order(
                 symbol, "market", "buy", contracts, None,
-                params={"tdMode": "isolated", "posSide": "net"},
+                params={"tdMode": "isolated"},
             )
 
         else:  # spot
@@ -208,7 +209,7 @@ def close_long_position(
         if market_type == "swap":
             order = exchange.create_order(
                 symbol, "market", "sell", contracts, None,
-                params={"tdMode": "isolated", "posSide": "net", "reduceOnly": True},
+                params={"tdMode": "isolated", "reduceOnly": True},
             )
         else:
             order = exchange.create_market_sell_order(symbol, contracts)
