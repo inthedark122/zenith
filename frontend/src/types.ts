@@ -169,6 +169,8 @@ export interface Worker {
   status: 'running' | 'stopped'
   strategy_id: number
   exchange_id: string
+  user_exchange_id?: number | null
+  selected_symbols?: string[] | null
   margin: string
   started_at?: string
   stopped_at?: string
@@ -196,6 +198,8 @@ export interface Trade {
 export interface LaunchWorkerPayload {
   strategy_id: number
   margin: number
+  user_exchange_id?: number
+  selected_symbols: string[]
 }
 
 export interface Plan {

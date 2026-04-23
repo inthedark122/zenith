@@ -5,8 +5,9 @@ import { useForm } from 'react-hook-form'
 
 import { tradingApi } from '../api/trading'
 import { useLaunchWorker, useStopWorker, useStrategies, useTrades, useWorkers } from '../hooks/useTrading'
-import { useWallet } from '../hooks/useWallet'
-import { Signal, Strategy, Trade, Worker } from '../types'
+import { useExchanges } from '../hooks/useExchanges'
+import { useMySubs } from '../hooks/useSubscriptions'
+import { Exchange, Signal, Strategy, Subscription, Trade, Worker } from '../types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -16,26 +17,90 @@ import { cn } from '@/lib/utils'
 
 interface MarginFormValues {
   margin: string
+  user_exchange_id: string
+}
+
+// ---- Subscription slot banner ----
+function SubscriptionBanner({
+  subscription,
+  runningCount,
+}: {
+  subscription: Subscription | null
+  runningCount: number
+}) {
+  const planMax: Record<string, number> = { starter: 1, trader: 2, pro: 3 }
+
+  if (!subscription) {
+    return (
+      <Card className="mx-5 mb-3 p-3 border-destructive/50 bg-destructive/10">
+        <p className="text-destructive text-xs font-semibold">
+          ⚠ No active subscription — subscribe to start trading
+        </p>
+      </Card>
+    )
+  }
+
+  const maxSlots = planMax[subscription.plan] ?? 1
+  const coins = subscription.coins ?? []
+
+  return (
+    <Card className="mx-5 mb-3 p-3 bg-input border-border">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-foreground font-semibold text-xs uppercase tracking-wide">
+          {subscription.plan} plan
+        </span>
+        <span className={cn(
+          'text-xs font-bold',
+          runningCount >= maxSlots ? 'text-destructive' : 'text-success',
+        )}>
+          {runningCount} / {maxSlots} slots used
+        </span>
+      </div>
+      {coins.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {coins.map((c) => (
+            <Badge key={c} variant="secondary" className="text-[10px]">{c}</Badge>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
 }
 
 // ---- Strategy Card (start worker) ----
 function StrategyCard({
   strategy,
-  walletBalance,
+  subscription,
+  exchanges,
+  runningCount,
 }: {
   strategy: Strategy
-  walletBalance: number
+  subscription: Subscription | null
+  exchanges: Exchange[]
+  runningCount: number
 }) {
   const {
     register,
     handleSubmit,
     reset,
+    watch,
     formState: { errors },
   } = useForm<MarginFormValues>()
   const [signal, setSignal] = useState<Signal | null>(null)
   const [signalLoading, setSignalLoading] = useState(false)
   const [signalError, setSignalError] = useState('')
+  const [selectedSymbols, setSelectedSymbols] = useState<string[]>([])
   const launchWorker = useLaunchWorker()
+
+  const planMax: Record<string, number> = { starter: 1, trader: 2, pro: 3 }
+  const maxSlots = planMax[subscription?.plan ?? ''] ?? 1
+  const slotsExhausted = runningCount >= maxSlots
+
+  const verifiedExchanges = exchanges.filter((e) => e.status === 'verified')
+
+  const selectedExchangeId = watch('user_exchange_id')
+  const selectedExchange = verifiedExchanges.find((e) => String(e.id) === selectedExchangeId)
+  const availableBalance = selectedExchange?.balance_usdt_free ?? null
 
   const fetchSignal = async () => {
     setSignalLoading(true)
@@ -54,9 +119,21 @@ function StrategyCard({
 
   const isDCA = strategy.strategy === 'DCA'
 
-  const maxDailyMargin = strategy.settings?.max_daily_margin_usd ?? 0
-  const maxDailyTrades = strategy.settings?.max_daily_trades ?? 2
-  const maxMargin = maxDailyMargin > 0 ? Math.min(walletBalance, maxDailyMargin) : walletBalance
+  const maxMargin = availableBalance != null ? availableBalance : 0
+
+  // Symbols available to select: intersection of strategy symbols and subscription coins
+  const subCoins = subscription?.coins ?? []
+  const strategySymbols = (strategy.symbols ?? []).map((s) => s.symbol)
+  const selectableSymbols = strategySymbols.map((sym) => ({
+    symbol: sym,
+    allowed: subCoins.length === 0 || subCoins.includes(sym),
+  }))
+
+  const toggleSymbol = (sym: string) => {
+    setSelectedSymbols((prev) =>
+      prev.includes(sym) ? prev.filter((s) => s !== sym) : [...prev, sym],
+    )
+  }
 
   const signalMetrics = signal
     ? [
@@ -65,14 +142,26 @@ function StrategyCard({
       ]
     : []
 
+  const canStart =
+    !!subscription &&
+    !slotsExhausted &&
+    verifiedExchanges.length > 0 &&
+    selectedSymbols.length > 0
+
   const onSubmit = (data: MarginFormValues) => {
     const marginVal = parseFloat(data.margin)
     launchWorker.mutate(
-      { strategy_id: strategy.id, margin: marginVal },
+      {
+        strategy_id: strategy.id,
+        margin: marginVal,
+        user_exchange_id: data.user_exchange_id ? parseInt(data.user_exchange_id) : undefined,
+        selected_symbols: selectedSymbols,
+      },
       {
         onSuccess: () => {
           reset()
           setSignal(null)
+          setSelectedSymbols([])
         },
       },
     )
@@ -111,25 +200,9 @@ function StrategyCard({
                 <div className="text-foreground font-semibold text-sm">1:{strategy.rr_ratio}</div>
                 <div>R:R</div>
               </div>
-              <div className="text-center">
-                <div className="text-foreground font-semibold text-sm">{maxDailyTrades}</div>
-                <div>Max/day</div>
-              </div>
             </>
           )}
         </div>
-      </div>
-
-      <div className="flex flex-wrap gap-1.5 mb-4">
-        {(strategy.symbols ?? []).map((sym, i) => (
-          <Badge key={`${sym.symbol}-${sym.market_type}-${i}`} variant="default" className="font-semibold gap-1">
-            <span className={sym.market_type === 'swap' ? 'text-amber-400' : 'text-emerald-400'}>
-              {sym.market_type === 'swap' ? 'P' : 'S'}
-            </span>
-            {sym.symbol}
-            {sym.market_type === 'swap' && <span className="text-xs opacity-70">{sym.leverage}×</span>}
-          </Badge>
-        ))}
       </div>
 
       <div className="bg-[#1a1a2e] border border-[#6c47ff33] rounded-[10px] p-3.5 mb-4">
@@ -143,8 +216,6 @@ function StrategyCard({
               • Each {strategy.settings?.step_percent ?? 0.5}% price drop triggers a safety order ({strategy.settings?.amount_multiplier ?? 2}× larger)
               <br />
               • Max {strategy.settings?.max_orders ?? 5} orders per cycle · TP at avg entry +{strategy.settings?.take_profit_percent ?? 1.0}%
-              <br />
-              • All orders close as WIN when TP is reached
             </>
           ) : (
             <>
@@ -153,13 +224,6 @@ function StrategyCard({
               • D1 MACD bullish crossover → opens a Long trade
               <br />
               • Risk/Reward 1:{strategy.rr_ratio} · Worker auto-closes at TP or SL
-              <br />
-              • Max {maxDailyTrades} entries per day per symbol
-              {maxDailyMargin > 0 && (
-                <>
-                  <br />• Max daily margin: ${maxDailyMargin}
-                </>
-              )}
             </>
           )}
         </p>
@@ -207,18 +271,6 @@ function StrategyCard({
               </div>
             </div>
           </div>
-          <div className="text-muted-foreground text-[11px] mb-2">
-            Backtest uses {strategy.latest_backtest.lookback_days} daily candles with $
-            {strategy.latest_backtest.margin_per_trade}/trade.
-          </div>
-          {strategy.latest_backtest.symbol_results.slice(0, 3).map((result) => (
-            <div key={result.symbol} className="flex justify-between text-xs mb-1">
-              <span className="text-foreground">{result.symbol}</span>
-              <span className="text-muted-foreground">
-                {result.total_trades} trades • {result.win_rate.toFixed(2)}%
-              </span>
-            </div>
-          ))}
         </Card>
       )}
 
@@ -256,30 +308,109 @@ function StrategyCard({
         </Card>
       )}
 
-      <form onSubmit={handleSubmit(onSubmit)} className="mb-3">
-        <Label>
-          Margin per trade (USDT) — available:{' '}
-          <span className="text-foreground font-semibold">${walletBalance.toFixed(2)}</span>
-        </Label>
-        <Input
-          type="number"
-          placeholder={`1 – ${maxMargin.toFixed(2)}`}
-          min="1"
-          max={maxMargin}
-          step="any"
-          className="mt-1 mb-3"
-          {...register('margin', {
-            required: 'Enter a valid margin',
-            min: { value: 1, message: 'Minimum margin is $1' },
-            max: {
-              value: maxMargin,
-              message: `Exceeds available balance ($${maxMargin.toFixed(2)})`,
-            },
-          })}
-        />
-        {errors.margin && (
-          <p className="text-destructive text-xs mb-2">{errors.margin.message}</p>
-        )}
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-3 mb-3">
+        {/* Exchange picker */}
+        <div>
+          <Label className="mb-1 block">Exchange API Key</Label>
+          {verifiedExchanges.length === 0 ? (
+            <p className="text-destructive text-xs">No verified exchange connected. Add one in Exchanges.</p>
+          ) : (
+            <select
+              {...register('user_exchange_id', { required: 'Select an exchange' })}
+              className="w-full rounded-md border border-input bg-background text-foreground text-sm px-3 py-2 focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="">Select exchange…</option>
+              {verifiedExchanges.map((exc) => (
+                <option key={exc.id} value={exc.id}>
+                  {exc.exchange_id.toUpperCase()}{exc.label ? ` — ${exc.label}` : ''}{' '}
+                  {exc.balance_usdt_free != null ? `($${exc.balance_usdt_free.toFixed(2)} free)` : ''}
+                </option>
+              ))}
+            </select>
+          )}
+          {errors.user_exchange_id && (
+            <p className="text-destructive text-xs mt-1">{errors.user_exchange_id.message}</p>
+          )}
+        </div>
+
+        {/* Token selector */}
+        <div>
+          <Label className="mb-1 block">
+            Tokens to trade{' '}
+            <span className="text-muted-foreground font-normal">
+              (select from strategy presets)
+            </span>
+          </Label>
+          <div className="flex flex-wrap gap-2">
+            {selectableSymbols.map(({ symbol, allowed }) => {
+              const sym = strategy.symbols?.find((s) => s.symbol === symbol)
+              const isSelected = selectedSymbols.includes(symbol)
+              return (
+                <button
+                  key={symbol}
+                  type="button"
+                  disabled={!allowed}
+                  onClick={() => allowed && toggleSymbol(symbol)}
+                  className={cn(
+                    'flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors cursor-pointer',
+                    isSelected
+                      ? 'bg-[#6c47ff] border-[#6c47ff] text-white'
+                      : allowed
+                      ? 'bg-input border-border text-foreground hover:border-[#6c47ff]'
+                      : 'bg-muted border-muted text-muted-foreground opacity-50 cursor-not-allowed',
+                  )}
+                  title={!allowed ? `${symbol} not in your subscription` : undefined}
+                >
+                  {sym && (
+                    <span className={sym.market_type === 'swap' ? 'text-amber-400' : 'text-emerald-400'}>
+                      {sym.market_type === 'swap' ? 'P' : 'S'}
+                    </span>
+                  )}
+                  {symbol}
+                  {sym?.market_type === 'swap' && <span className="opacity-70">{sym.leverage}×</span>}
+                  {!allowed && <span className="ml-0.5 opacity-60">🔒</span>}
+                </button>
+              )
+            })}
+          </div>
+          {selectedSymbols.length === 0 && (
+            <p className="text-muted-foreground text-xs mt-1">Select at least one token</p>
+          )}
+        </div>
+
+        {/* Margin */}
+        <div>
+          <Label className="mb-1 block">
+            Margin per trade (USDT){' '}
+            {availableBalance != null ? (
+              <span className="text-foreground font-semibold">
+                — available: ${availableBalance.toFixed(2)}
+              </span>
+            ) : selectedExchange ? (
+              <span className="text-muted-foreground font-normal">— balance syncing…</span>
+            ) : null}
+          </Label>
+          <Input
+            type="number"
+            placeholder={availableBalance != null ? `1 – ${availableBalance.toFixed(2)}` : 'e.g. 100'}
+            min="1"
+            max={maxMargin > 0 ? maxMargin : undefined}
+            step="any"
+            {...register('margin', {
+              required: 'Enter a valid margin',
+              min: { value: 1, message: 'Minimum margin is $1' },
+              ...(maxMargin > 0 && {
+                max: {
+                  value: maxMargin,
+                  message: `Exceeds available balance ($${maxMargin.toFixed(2)})`,
+                },
+              }),
+            })}
+          />
+          {errors.margin && (
+            <p className="text-destructive text-xs mt-1">{errors.margin.message}</p>
+          )}
+        </div>
 
         <div className="flex gap-2">
           {!isDCA && (
@@ -294,8 +425,19 @@ function StrategyCard({
               {signalLoading ? '…' : '📊 Signal'}
             </Button>
           )}
-          <Button type="submit" size="sm" disabled={launchWorker.isPending} className="flex-1">
-            {launchWorker.isPending ? 'Starting…' : '▶ Start Worker'}
+          <Button
+            type="submit"
+            size="sm"
+            disabled={launchWorker.isPending || !canStart}
+            className="flex-1"
+          >
+            {launchWorker.isPending
+              ? 'Starting…'
+              : slotsExhausted
+              ? 'All slots in use'
+              : !subscription
+              ? 'Subscription required'
+              : '▶ Start Worker'}
           </Button>
         </div>
       </form>
@@ -343,6 +485,13 @@ function WorkerRow({ worker }: { worker: Worker }) {
         </div>
         <Badge variant={isRunning ? 'success' : 'secondary'}>{worker.status.toUpperCase()}</Badge>
       </div>
+      {worker.selected_symbols && worker.selected_symbols.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {worker.selected_symbols.map((sym) => (
+            <Badge key={sym} variant="default" className="text-xs">{sym}</Badge>
+          ))}
+        </div>
+      )}
       <div className="flex gap-4 mb-3 flex-wrap text-xs">
         {workerDetails.map(({ label, value }) => (
           <div key={label}>
@@ -423,9 +572,12 @@ export default function Trading() {
   const { data: strategies = [], isLoading: strategiesLoading } = useStrategies()
   const { data: workers = [] } = useWorkers()
   const { data: trades = [] } = useTrades()
-  const { data: wallet } = useWallet()
+  const { data: exchanges = [] } = useExchanges()
+  const { data: subscriptions = [] } = useMySubs()
 
-  const walletBalance = parseFloat(wallet?.balance ?? '0') || 0
+  const activeSub: Subscription | null =
+    subscriptions.find((s) => s.status === 'active') ?? null
+
   const runningWorkers = workers.filter((w) => w.status === 'running')
   const openTrades = trades.filter((t) => t.status === 'open')
 
@@ -444,19 +596,9 @@ export default function Trading() {
             ? `${strategies.length} strateg${strategies.length === 1 ? 'y' : 'ies'} available`
             : 'No strategies available yet'}
         </p>
-        <div className="flex items-center gap-2 mt-3">
-          <Card className="flex-1 px-4 py-2.5 text-center">
-            <div className="text-muted-foreground text-xs">Wallet Balance</div>
-            <div className="text-foreground font-bold text-lg">
-              ${walletBalance.toFixed(2)} USDT
-            </div>
-          </Card>
-          <Card className="px-4 py-2.5 text-center">
-            <div className="text-muted-foreground text-xs">Running</div>
-            <div className="text-success font-bold text-lg">{runningWorkers.length}</div>
-          </Card>
-        </div>
       </div>
+
+      <SubscriptionBanner subscription={activeSub} runningCount={runningWorkers.length} />
 
       <div className="flex mx-5 mb-2 border-b border-border">
         {tabs.map(({ key, label, icon: Icon }) => (
@@ -487,7 +629,13 @@ export default function Trading() {
           </p>
         ) : (
           strategies.map((s) => (
-            <StrategyCard key={s.id} strategy={s} walletBalance={walletBalance} />
+            <StrategyCard
+              key={s.id}
+              strategy={s}
+              subscription={activeSub}
+              exchanges={exchanges}
+              runningCount={runningWorkers.length}
+            />
           ))
         ))}
 
@@ -519,3 +667,4 @@ export default function Trading() {
     </div>
   )
 }
+
