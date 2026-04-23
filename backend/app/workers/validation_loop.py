@@ -136,6 +136,27 @@ async def _cleanup_old_tasks() -> None:
         db.close()
 
 
+async def _process_pending_tasks() -> None:
+    """Process any tasks that were created while the worker wasn't listening.
+    
+    LISTEN/NOTIFY is fire-and-forget — if the worker was down when NOTIFY was
+    sent, those tasks are stuck at 'processing'. Scan for them on startup.
+    """
+    db = SessionLocal()
+    try:
+        stuck = (
+            db.query(ExchangeValidationTask)
+            .filter(ExchangeValidationTask.status == "processing")
+            .all()
+        )
+        if stuck:
+            log.info("Found %d pending validation task(s) missed while offline, processing now", len(stuck))
+            for task in stuck:
+                asyncio.create_task(_process_task(task.id))
+    finally:
+        db.close()
+
+
 async def validation_loop() -> None:
     """
     Main validation loop. Subscribes to LISTEN exchange_validation and
@@ -143,6 +164,7 @@ async def validation_loop() -> None:
     """
     log.info("Exchange validation loop starting — LISTEN %s", _LISTEN_CHANNEL)
     await _cleanup_old_tasks()
+    await _process_pending_tasks()
 
     while True:
         try:
