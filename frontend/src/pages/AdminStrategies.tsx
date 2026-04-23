@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { useAdminStrategies, useCreateAdminStrategy } from '../hooks/useAdmin'
-import { AdminStrategyPayload } from '../types'
+import { AdminStrategyPayload, StrategySymbol } from '../types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -24,7 +24,7 @@ function defaultPayload(type: StrategyType = 'DCA_MACD_DAILY'): AdminStrategyPay
   return {
     name: '',
     strategy: type,
-    symbols: ['BTC/USDT'],
+    symbols: [{ symbol: 'BTC/USDT', market_type: 'spot' as const, leverage: 1 }],
     leverage: type === 'DCA' ? 1 : 20,
     rr_ratio: 2,
     settings: defaultSettings(type),
@@ -49,7 +49,7 @@ export default function AdminStrategies() {
 
   const handleCreate = () => {
     setFormError('')
-    const payload = { ...form, symbols: form.symbols.filter(Boolean) }
+    const payload = { ...form, symbols: form.symbols.filter((s: StrategySymbol) => s.symbol) }
     if (!payload.name.trim()) { setFormError('Name is required'); return }
     if (payload.symbols.length === 0) { setFormError('Add at least one symbol'); return }
     createStrategy.mutate(payload, {
@@ -180,7 +180,7 @@ export default function AdminStrategies() {
                 <div className="min-w-0">
                   <div className="text-foreground font-semibold truncate">{s.name}</div>
                   <div className="text-[#a78bfa] text-xs mt-0.5">{s.strategy}</div>
-                  <div className="text-muted-foreground text-xs mt-1">{s.symbols.join(', ')} · {s.leverage}× · R:R 1:{s.rr_ratio}</div>
+                  <div className="text-muted-foreground text-xs mt-1">{s.symbols.map(sym => sym.symbol).join(', ')} · {s.leverage}× · R:R 1:{s.rr_ratio}</div>
                 </div>
                 <div className="flex flex-col items-end gap-2 shrink-0">
                   <Badge variant={s.is_active ? 'success' : 'secondary'}>{s.is_active ? 'Active' : 'Inactive'}</Badge>

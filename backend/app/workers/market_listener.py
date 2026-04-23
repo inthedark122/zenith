@@ -70,7 +70,9 @@ def _collect_symbols(db) -> set:
     strategies = db.query(Strategy).filter(Strategy.is_active).all()
     symbols: set = set()
     for s in strategies:
-        for sym in s.symbols or []:
+        for sym_cfg in s.symbols or []:
+            # sym_cfg is a dict: {"symbol": "BTC/USDT", "market_type": "spot", "leverage": 1}
+            sym = sym_cfg["symbol"] if isinstance(sym_cfg, dict) else sym_cfg
             symbols.add(sym)
     return symbols
 

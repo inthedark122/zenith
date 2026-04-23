@@ -25,6 +25,7 @@ import {
   StrategyBacktestOrder,
   StrategyBacktestRun,
   StrategyBacktestSummary,
+  StrategySymbol,
 } from '../types'
 import { Badge } from '@/components/ui/badge'
 import { BacktestChart } from '@/components/ui/backtest-chart'
@@ -245,7 +246,7 @@ export default function AdminStrategyDetail() {
   const saveStrategy = () => {
     if (!form) return
     setFormError('')
-    const payload = { ...form, symbols: form.symbols.filter(Boolean) }
+    const payload = { ...form, symbols: form.symbols.filter((s: StrategySymbol) => s.symbol) }
     if (!payload.name.trim()) { setFormError('Strategy name is required'); return }
     if (payload.symbols.length === 0) { setFormError('Add at least one symbol'); return }
     updateStrategy.mutate({ strategyId: strategy.id, payload })
@@ -285,7 +286,7 @@ export default function AdminStrategyDetail() {
             </Badge>
           </div>
           <div className="text-muted-foreground text-xs mt-1">
-            {strategy.strategy} · {strategy.symbols.join(', ')} · {strategy.leverage === 1 ? 'Spot' : `${strategy.leverage}× Futures`} · R:R 1:{strategy.rr_ratio}
+            {strategy.strategy} · {strategy.symbols.map(s => s.symbol).join(', ')} · {strategy.leverage === 1 ? 'Spot' : `${strategy.leverage}× Futures`} · R:R 1:{strategy.rr_ratio}
           </div>
         </div>
       </div>

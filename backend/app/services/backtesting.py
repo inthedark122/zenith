@@ -199,7 +199,8 @@ def run_strategy_backtest(
     overall_period_start: Optional[datetime] = None
     overall_period_end: Optional[datetime] = None
 
-    for symbol in strategy.symbols or []:
+    for sym_cfg in strategy.symbols or []:
+        symbol: str = sym_cfg["symbol"] if isinstance(sym_cfg, dict) else sym_cfg
         # ── Step 1: D1 candles for MACD signal detection ──────────────────
         d1_candles = exchange.fetch_ohlcv(symbol, timeframe="1d", limit=d1_limit)
         if len(d1_candles) < 35:

@@ -121,9 +121,13 @@ function StrategyCard({
       </div>
 
       <div className="flex flex-wrap gap-1.5 mb-4">
-        {(strategy.symbols ?? []).map((sym) => (
-          <Badge key={sym} variant="default" className="font-semibold">
-            {sym}
+        {(strategy.symbols ?? []).map((sym, i) => (
+          <Badge key={`${sym.symbol}-${sym.market_type}-${i}`} variant="default" className="font-semibold gap-1">
+            <span className={sym.market_type === 'swap' ? 'text-amber-400' : 'text-emerald-400'}>
+              {sym.market_type === 'swap' ? 'P' : 'S'}
+            </span>
+            {sym.symbol}
+            {sym.market_type === 'swap' && <span className="text-xs opacity-70">{sym.leverage}×</span>}
           </Badge>
         ))}
       </div>

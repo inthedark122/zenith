@@ -68,7 +68,11 @@ def run_for_worker(
     max_orders: int = int(settings.get("max_orders", 5))
     take_profit_percent: float = float(settings.get("take_profit_percent", 1.0))
 
-    for symbol in (strategy.symbols or []):
+    for sym_cfg in (strategy.symbols or []):
+        symbol: str = sym_cfg["symbol"] if isinstance(sym_cfg, dict) else sym_cfg
+        sym_market_type: str = sym_cfg.get("market_type", "spot") if isinstance(sym_cfg, dict) else "spot"
+        sym_leverage: int = int(sym_cfg.get("leverage", 1)) if isinstance(sym_cfg, dict) else 1
+
         current_price = current_prices.get(symbol)
         if current_price is None:
             log.warning("Worker #%d: no price for %s — skipping", worker.id, symbol)
@@ -105,7 +109,8 @@ def run_for_worker(
                     "avg_entry_price": str(current_price),
                     "take_profit_price": str(tp_price),
                     "margin": str(initial_amount),
-                    "leverage": 1,
+                    "leverage": sym_leverage,
+                    "market_type": sym_market_type,
                 },
             )
             db.add(trade)
@@ -176,7 +181,8 @@ def run_for_worker(
                 "avg_entry_price": str(new_avg_entry),
                 "take_profit_price": str(new_tp_price),
                 "margin": str(next_amount),
-                "leverage": 1,
+                "leverage": sym_leverage,
+                "market_type": sym_market_type,
             },
         )
         db.add(trade)

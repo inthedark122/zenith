@@ -1,19 +1,31 @@
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, field_validator
 
 from app.models.strategy import SUPPORTED_STRATEGIES
 
 
+class StrategySymbol(BaseModel):
+    """A single tradeable instrument entry within a strategy."""
+    symbol: str                             # ccxt symbol: "BTC/USDT" (spot) or "BTC/USDT:USDT" (swap)
+    market_type: Literal["spot", "swap"]    # determines which exchange market is used
+    leverage: int = 1                       # 1 for spot; ≥1 for swap
+
+    @field_validator("leverage")
+    @classmethod
+    def validate_leverage(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("leverage must be ≥ 1")
+        return v
+
+
 class StrategyCreate(BaseModel):
     name: str
     strategy: str = "DCA_MACD_DAILY"
-    symbols: List[str]
-    leverage: float = 20.0
+    symbols: List[StrategySymbol]
+    leverage: float = 20.0          # kept for backwards compat / MACD strategy default
     rr_ratio: float = 2.0
-    # Strategy-specific configuration — keys depend on the strategy implementation.
-    # DCA_MACD_DAILY accepts: {"max_daily_trades": int, "max_daily_margin_usd": float}
     settings: Dict[str, Any] = {}
     is_active: bool = True
 
@@ -28,7 +40,7 @@ class StrategyCreate(BaseModel):
 
     @field_validator("symbols")
     @classmethod
-    def validate_symbols(cls, v: List[str]) -> List[str]:
+    def validate_symbols(cls, v: List[StrategySymbol]) -> List[StrategySymbol]:
         if not v:
             raise ValueError("symbols must contain at least one trading pair")
         return v
@@ -50,7 +62,7 @@ class StrategyCreate(BaseModel):
 
 class StrategyUpdate(BaseModel):
     name: Optional[str] = None
-    symbols: Optional[List[str]] = None
+    symbols: Optional[List[StrategySymbol]] = None
     leverage: Optional[float] = None
     rr_ratio: Optional[float] = None
     settings: Optional[Dict[str, Any]] = None
@@ -142,7 +154,7 @@ class StrategyResponse(BaseModel):
     id: int
     name: str
     strategy: str
-    symbols: List[str]
+    symbols: List[StrategySymbol]
     leverage: float
     rr_ratio: float
     settings: Dict[str, Any]

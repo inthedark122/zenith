@@ -32,7 +32,7 @@ export default function Subscriptions() {
   const { data: mySubs = [] } = useMySubs()
   const { data: wallet } = useWallet()
   const { data: strategies = [] } = useStrategies()
-  const availableSymbols = [...new Set(strategies.flatMap((s) => s.symbols ?? []))]
+  const availableSymbols = [...new Set(strategies.flatMap((s) => (s.symbols ?? []).map(sym => sym.symbol)))]
 
   const subscribeMutation = useSubscribe()
   const cancelMutation = useCancelSubscription()

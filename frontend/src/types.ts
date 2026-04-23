@@ -117,13 +117,19 @@ export interface StrategyBacktestRun extends StrategyBacktestSummary {
   orders: StrategyBacktestOrder[]
 }
 
+export interface StrategySymbol {
+  symbol: string
+  market_type: 'spot' | 'swap'
+  leverage: number
+}
+
 export interface Strategy {
   id: number
   name: string
   strategy: string
   leverage: number
   rr_ratio: number
-  symbols: string[]
+  symbols: StrategySymbol[]
   settings?: StrategySettings
   latest_backtest?: StrategyBacktestSummary | null
   is_active?: boolean
@@ -158,6 +164,7 @@ export interface TradeDetails {
   stop_loss_price?: string
   margin?: string
   leverage?: number
+  market_type?: 'spot' | 'swap'
 }
 
 export interface Trade {
@@ -197,7 +204,7 @@ export interface SubscribePayload {
 export interface AdminStrategyPayload {
   name: string
   strategy: string
-  symbols: string[]
+  symbols: StrategySymbol[]
   leverage: number
   rr_ratio: number
   settings: StrategySettings

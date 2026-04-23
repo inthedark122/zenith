@@ -3,6 +3,7 @@ import { ChevronDown, Loader2, Search, X } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 
 import { useSymbols } from '@/hooks/useAdmin'
+import { StrategySymbol } from '@/types'
 import { cn } from '@/lib/utils'
 
 // ---- Supported exchange / market-type options ----
@@ -16,9 +17,17 @@ type MarketType = (typeof MARKET_TYPES)[number]
 // ---- Props ----
 
 interface SymbolPickerProps {
-  value: string[]
-  onChange: (symbols: string[]) => void
+  value: StrategySymbol[]
+  onChange: (symbols: StrategySymbol[]) => void
   className?: string
+}
+
+// ---- Helpers ----
+
+function marketTypeBadge(mt: MarketType) {
+  return mt === 'spot'
+    ? <span className="text-[10px] font-bold text-emerald-400 bg-emerald-400/10 px-1 rounded">S</span>
+    : <span className="text-[10px] font-bold text-amber-400 bg-amber-400/10 px-1 rounded">P</span>
 }
 
 // ---- Component ----
@@ -28,27 +37,36 @@ export function SymbolPicker({ value, onChange, className }: SymbolPickerProps) 
   const [search, setSearch] = useState('')
   const [exchange, setExchange] = useState<Exchange>('okx')
   const [marketType, setMarketType] = useState<MarketType>('spot')
+  const [defaultLeverage, setDefaultLeverage] = useState(1)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const { data: allSymbols = [], isLoading, isError } = useSymbols(exchange, marketType)
 
   const filtered = useMemo(() => {
     const q = search.trim().toUpperCase()
-    if (!q) return allSymbols.slice(0, 100) // cap initial list to 100
+    if (!q) return allSymbols.slice(0, 100)
     return allSymbols.filter((s) => s.toUpperCase().includes(q)).slice(0, 100)
   }, [allSymbols, search])
 
-  const toggle = (symbol: string) => {
-    if (value.includes(symbol)) {
-      onChange(value.filter((s) => s !== symbol))
+  // A symbol is "selected" if the exact (symbol + market_type) combo is in value
+  const isSelected = (sym: string) =>
+    value.some((v) => v.symbol === sym && v.market_type === marketType)
+
+  const toggle = (sym: string) => {
+    if (isSelected(sym)) {
+      onChange(value.filter((v) => !(v.symbol === sym && v.market_type === marketType)))
     } else {
-      onChange([...value, symbol])
+      onChange([...value, { symbol: sym, market_type: marketType, leverage: defaultLeverage }])
     }
   }
 
-  const remove = (symbol: string, e: React.MouseEvent) => {
+  const remove = (index: number, e: React.MouseEvent) => {
     e.stopPropagation()
-    onChange(value.filter((s) => s !== symbol))
+    onChange(value.filter((_, i) => i !== index))
+  }
+
+  const updateLeverage = (index: number, leverage: number) => {
+    onChange(value.map((v, i) => (i === index ? { ...v, leverage } : v)))
   }
 
   return (
@@ -69,17 +87,32 @@ export function SymbolPicker({ value, onChange, className }: SymbolPickerProps) 
           {value.length === 0 && (
             <span className="text-muted-foreground text-sm">Search symbols…</span>
           )}
-          {value.map((s) => (
+          {value.map((s, i) => (
             <span
-              key={s}
+              key={`${s.symbol}-${s.market_type}-${i}`}
               className="flex items-center gap-1 bg-[#1e1e2e] border border-[#6c47ff]/40 text-[#a78bfa] text-xs font-medium px-2 py-0.5 rounded-lg"
+              onClick={(e) => e.stopPropagation()}
             >
-              {s}
+              {marketTypeBadge(s.market_type as MarketType)}
+              {s.symbol}
+              {s.market_type === 'swap' && (
+                <input
+                  type="number"
+                  min={1}
+                  max={125}
+                  value={s.leverage}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => updateLeverage(i, Number(e.target.value))}
+                  className="w-10 bg-transparent border-b border-[#6c47ff]/60 text-[#a78bfa] text-center text-xs outline-none px-0.5"
+                  title="Leverage"
+                />
+              )}
+              {s.market_type === 'swap' && <span className="text-[10px] text-[#a78bfa]/60">×</span>}
               <button
                 type="button"
-                onClick={(e) => remove(s, e)}
+                onClick={(e) => remove(i, e)}
                 className="text-[#a78bfa]/60 hover:text-[#a78bfa] transition-colors"
-                aria-label={`Remove ${s}`}
+                aria-label={`Remove ${s.symbol}`}
               >
                 <X size={11} />
               </button>
@@ -115,13 +148,31 @@ export function SymbolPicker({ value, onChange, className }: SymbolPickerProps) 
             </select>
             <select
               value={marketType}
-              onChange={(e) => setMarketType(e.target.value as MarketType)}
+              onChange={(e) => {
+                const mt = e.target.value as MarketType
+                setMarketType(mt)
+                setDefaultLeverage(mt === 'spot' ? 1 : 20)
+              }}
               className="flex-1 bg-input text-foreground text-xs rounded-lg border border-border px-2 py-1.5 outline-none cursor-pointer"
             >
               {MARKET_TYPES.map((t) => (
-                <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
+                <option key={t} value={t}>{t === 'spot' ? 'Spot' : 'Swap (Perp)'}</option>
               ))}
             </select>
+            {marketType === 'swap' && (
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-muted-foreground text-xs">Lev</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={125}
+                  value={defaultLeverage}
+                  onChange={(e) => setDefaultLeverage(Number(e.target.value))}
+                  className="w-12 bg-input text-foreground text-xs rounded-lg border border-border px-2 py-1.5 outline-none"
+                  title="Default leverage for new swap symbols"
+                />
+              </div>
+            )}
           </div>
 
           {/* Search */}
@@ -154,7 +205,7 @@ export function SymbolPicker({ value, onChange, className }: SymbolPickerProps) 
               <div className="px-4 py-4 text-muted-foreground text-sm">No symbols found.</div>
             )}
             {filtered.map((sym) => {
-              const selected = value.includes(sym)
+              const selected = isSelected(sym)
               return (
                 <button
                   key={sym}
@@ -201,3 +252,4 @@ export function SymbolPicker({ value, onChange, className }: SymbolPickerProps) 
     </Popover.Root>
   )
 }
+

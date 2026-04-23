@@ -72,7 +72,11 @@ def run_for_worker(
     # ------------------------------------------------------------------
     # 1.  Evaluate entry signals for each symbol
     # ------------------------------------------------------------------
-    for symbol in (strategy.symbols or []):
+    for sym_cfg in (strategy.symbols or []):
+        symbol: str = sym_cfg["symbol"] if isinstance(sym_cfg, dict) else sym_cfg
+        sym_market_type: str = sym_cfg.get("market_type", "spot") if isinstance(sym_cfg, dict) else "spot"
+        sym_leverage: float = float(sym_cfg.get("leverage", strategy.leverage)) if isinstance(sym_cfg, dict) else strategy.leverage
+
         signal = latest_signals.get(symbol)
         if signal is None:
             continue
@@ -131,7 +135,7 @@ def run_for_worker(
             continue
 
         timeframe = "1d" if entry_number == 1 else "15m"
-        leverage = strategy.leverage
+        leverage = sym_leverage
         rr_ratio = strategy.rr_ratio
 
         tp = calculate_take_profit(
@@ -163,6 +167,7 @@ def run_for_worker(
                 "margin": str(margin),
                 "leverage": leverage,
                 "rr_ratio": rr_ratio,
+                "market_type": sym_market_type,
             },
         )
         db.add(trade)
