@@ -178,8 +178,10 @@ export interface Worker {
 
 export interface TradeDetails {
   entry_number?: number
+  dca_order_number?: number
   timeframe?: string
   entry_price?: string
+  avg_entry_price?: string
   take_profit_price?: string
   stop_loss_price?: string
   margin?: string
@@ -189,6 +191,7 @@ export interface TradeDetails {
 
 export interface Trade {
   id: number
+  worker_id: number
   symbol: string
   status: 'open' | 'win' | 'loss'
   exchange?: string

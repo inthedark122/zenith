@@ -26,11 +26,13 @@ function StrategyCard({
   subscription,
   exchanges,
   runningCount,
+  onWorkerLaunched,
 }: {
   strategy: Strategy
   subscription: Subscription | null
   exchanges: Exchange[]
   runningCount: number
+  onWorkerLaunched?: () => void
 }) {
   const {
     register,
@@ -110,6 +112,7 @@ function StrategyCard({
           reset()
           setSignal(null)
           setSelectedSymbols([])
+          onWorkerLaunched?.()
         },
       },
     )
@@ -402,9 +405,13 @@ function StrategyCard({
 }
 
 // ---- Worker Row ----
-function WorkerRow({ worker }: { worker: Worker }) {
+function WorkerRow({ worker, trades }: { worker: Worker; trades: Trade[] }) {
   const stopWorker = useStopWorker()
   const isRunning = worker.status === 'running'
+
+  const openPositions = trades.filter(
+    (t) => t.worker_id === worker.id && t.status === 'open',
+  )
 
   const workerDetails = [
     { label: 'Exchange', value: worker.exchange_id.toUpperCase() },
@@ -444,6 +451,48 @@ function WorkerRow({ worker }: { worker: Worker }) {
           </div>
         ))}
       </div>
+
+      {openPositions.length > 0 && (
+        <div className="mb-3">
+          <div className="text-muted-foreground text-xs mb-1.5 font-medium">
+            Open positions ({openPositions.length})
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {openPositions.map((pos) => {
+              const d = pos.details ?? {}
+              return (
+                <div
+                  key={pos.id}
+                  className="bg-muted/40 rounded-lg px-3 py-2 flex justify-between items-center"
+                >
+                  <div>
+                    <span className="text-foreground font-semibold text-xs">{pos.symbol}</span>
+                    {d.market_type && (
+                      <span className="text-muted-foreground text-xs ml-1.5">
+                        {String(d.market_type).toUpperCase()}
+                        {d.leverage && d.leverage > 1 ? ` ${d.leverage}×` : ''}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-right text-xs">
+                    {d.entry_price && (
+                      <span className="text-foreground font-semibold">
+                        @ ${parseFloat(String(d.entry_price)).toFixed(4)}
+                      </span>
+                    )}
+                    {d.take_profit_price && (
+                      <span className="text-success ml-2">
+                        TP ${parseFloat(String(d.take_profit_price)).toFixed(4)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {isRunning && (
         <Button
           variant="danger"
@@ -577,6 +626,7 @@ export default function Trading() {
               subscription={activeSub}
               exchanges={exchanges}
               runningCount={runningWorkers.length}
+              onWorkerLaunched={() => setTab('workers')}
             />
           ))
         ))}
@@ -589,7 +639,7 @@ export default function Trading() {
               No workers yet — start one from Strategies.
             </p>
           ) : (
-            workers.map((w) => <WorkerRow key={w.id} worker={w} />)
+            workers.map((w) => <WorkerRow key={w.id} worker={w} trades={trades} />)
           )}
         </>
       )}
