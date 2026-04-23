@@ -20,53 +20,6 @@ interface MarginFormValues {
   user_exchange_id: string
 }
 
-// ---- Subscription slot banner ----
-function SubscriptionBanner({
-  subscription,
-  runningCount,
-}: {
-  subscription: Subscription | null
-  runningCount: number
-}) {
-  const planMax: Record<string, number> = { starter: 1, trader: 2, pro: 3 }
-
-  if (!subscription) {
-    return (
-      <Card className="mx-5 mb-3 p-3 border-destructive/50 bg-destructive/10">
-        <p className="text-destructive text-xs font-semibold">
-          ⚠ No active subscription — subscribe to start trading
-        </p>
-      </Card>
-    )
-  }
-
-  const maxSlots = planMax[subscription.plan] ?? 1
-  const coins = subscription.coins ?? []
-
-  return (
-    <Card className="mx-5 mb-3 p-3 bg-input border-border">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-foreground font-semibold text-xs uppercase tracking-wide">
-          {subscription.plan} plan
-        </span>
-        <span className={cn(
-          'text-xs font-bold',
-          runningCount >= maxSlots ? 'text-destructive' : 'text-success',
-        )}>
-          {runningCount} / {maxSlots} slots used
-        </span>
-      </div>
-      {coins.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-1">
-          {coins.map((c) => (
-            <Badge key={c} variant="secondary" className="text-[10px]">{c}</Badge>
-          ))}
-        </div>
-      )}
-    </Card>
-  )
-}
-
 // ---- Strategy Card (start worker) ----
 function StrategyCard({
   strategy,
@@ -121,13 +74,14 @@ function StrategyCard({
 
   const maxMargin = availableBalance != null ? availableBalance : 0
 
-  // Symbols available to select: intersection of strategy symbols and subscription coins
+  // Only show tokens that are in subscription.coins ∩ strategy.symbols
+  // If sub has no coins configured (legacy), show all strategy tokens
   const subCoins = subscription?.coins ?? []
   const strategySymbols = (strategy.symbols ?? []).map((s) => s.symbol)
-  const selectableSymbols = strategySymbols.map((sym) => ({
-    symbol: sym,
-    allowed: subCoins.length === 0 || subCoins.includes(sym),
-  }))
+  const selectableSymbols =
+    subCoins.length > 0
+      ? strategySymbols.filter((sym) => subCoins.includes(sym))
+      : strategySymbols
 
   const toggleSymbol = (sym: string) => {
     setSelectedSymbols((prev) =>
@@ -335,45 +289,41 @@ function StrategyCard({
 
         {/* Token selector */}
         <div>
-          <Label className="mb-1 block">
-            Tokens to trade{' '}
-            <span className="text-muted-foreground font-normal">
-              (select from strategy presets)
-            </span>
-          </Label>
-          <div className="flex flex-wrap gap-2">
-            {selectableSymbols.map(({ symbol, allowed }) => {
-              const sym = strategy.symbols?.find((s) => s.symbol === symbol)
-              const isSelected = selectedSymbols.includes(symbol)
-              return (
-                <button
-                  key={symbol}
-                  type="button"
-                  disabled={!allowed}
-                  onClick={() => allowed && toggleSymbol(symbol)}
-                  className={cn(
-                    'flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors cursor-pointer',
-                    isSelected
-                      ? 'bg-[#6c47ff] border-[#6c47ff] text-white'
-                      : allowed
-                      ? 'bg-input border-border text-foreground hover:border-[#6c47ff]'
-                      : 'bg-muted border-muted text-muted-foreground opacity-50 cursor-not-allowed',
-                  )}
-                  title={!allowed ? `${symbol} not in your subscription` : undefined}
-                >
-                  {sym && (
-                    <span className={sym.market_type === 'swap' ? 'text-amber-400' : 'text-emerald-400'}>
-                      {sym.market_type === 'swap' ? 'P' : 'S'}
-                    </span>
-                  )}
-                  {symbol}
-                  {sym?.market_type === 'swap' && <span className="opacity-70">{sym.leverage}×</span>}
-                  {!allowed && <span className="ml-0.5 opacity-60">🔒</span>}
-                </button>
-              )
-            })}
-          </div>
-          {selectedSymbols.length === 0 && (
+          <Label className="mb-1 block">Token to trade</Label>
+          {selectableSymbols.length === 0 ? (
+            <p className="text-destructive text-xs">
+              No tokens available — your subscription coins don't match this strategy.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {selectableSymbols.map((symbol) => {
+                const sym = strategy.symbols?.find((s) => s.symbol === symbol)
+                const isSelected = selectedSymbols.includes(symbol)
+                return (
+                  <button
+                    key={symbol}
+                    type="button"
+                    onClick={() => toggleSymbol(symbol)}
+                    className={cn(
+                      'flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors cursor-pointer',
+                      isSelected
+                        ? 'bg-[#6c47ff] border-[#6c47ff] text-white'
+                        : 'bg-input border-border text-foreground hover:border-[#6c47ff]',
+                    )}
+                  >
+                    {sym && (
+                      <span className={sym.market_type === 'swap' ? 'text-amber-400' : 'text-emerald-400'}>
+                        {sym.market_type === 'swap' ? 'P' : 'S'}
+                      </span>
+                    )}
+                    {symbol}
+                    {sym?.market_type === 'swap' && <span className="opacity-70">{sym.leverage}×</span>}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          {selectableSymbols.length > 0 && selectedSymbols.length === 0 && (
             <p className="text-muted-foreground text-xs mt-1">Select at least one token</p>
           )}
         </div>
@@ -597,8 +547,6 @@ export default function Trading() {
             : 'No strategies available yet'}
         </p>
       </div>
-
-      <SubscriptionBanner subscription={activeSub} runningCount={runningWorkers.length} />
 
       <div className="flex mx-5 mb-2 border-b border-border">
         {tabs.map(({ key, label, icon: Icon }) => (
