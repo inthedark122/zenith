@@ -83,6 +83,16 @@ def _calc_swap_contracts(
     lot = 10 ** (-amount_precision) if amount_precision > 0 else 1.0
 
     position_value = usdt_margin * leverage
+    # Reserve a small buffer for taker fees (typically 0.05–0.1% of notional).
+    # Without this, margin + fee > available balance and OKX rejects the order.
+    try:
+        fee_rate = float(
+            exchange.fees.get("trading", {}).get("taker", 0.001)
+        )
+    except Exception:
+        fee_rate = 0.001
+    fee_buffer = 1.0 / (1.0 + fee_rate * leverage)
+    position_value *= fee_buffer
     base_amount = position_value / entry_price
     raw_contracts = base_amount / contract_size
 
