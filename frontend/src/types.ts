@@ -28,10 +28,15 @@ export interface DepositAddressResponse {
 }
 
 export interface Exchange {
+  id: number
   exchange_id: string
   label?: string
   api_key?: string
   is_default: boolean
+  status: 'pending' | 'verified' | 'invalid'
+  balance_usdt_free?: number | null
+  balance_usdt_total?: number | null
+  balance_updated_at?: string | null
 }
 
 export interface SupportedExchangesResponse {
@@ -54,6 +59,7 @@ export interface ExchangeAccountBalance {
 
 export interface ExchangeBalance {
   accounts: ExchangeAccountBalance[]
+  last_updated?: string | null
   error?: string | null
 }
 

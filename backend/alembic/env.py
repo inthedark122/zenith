@@ -19,15 +19,16 @@ from app.db.base import Base  # noqa: E402
 from app.core.config import settings  # noqa: E402
 
 # Register all models with the metadata
-import app.models.exchange      # noqa: F401
-import app.models.backtest      # noqa: F401
-import app.models.referral      # noqa: F401
-import app.models.strategy      # noqa: F401
-import app.models.subscription  # noqa: F401
-import app.models.trade         # noqa: F401
-import app.models.user          # noqa: F401
-import app.models.wallet        # noqa: F401
-import app.models.worker        # noqa: F401
+import app.models.exchange         # noqa: F401
+import app.models.backtest         # noqa: F401
+import app.models.referral         # noqa: F401
+import app.models.strategy         # noqa: F401
+import app.models.subscription     # noqa: F401
+import app.models.trade            # noqa: F401
+import app.models.user             # noqa: F401
+import app.models.validation_task  # noqa: F401
+import app.models.wallet           # noqa: F401
+import app.models.worker           # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

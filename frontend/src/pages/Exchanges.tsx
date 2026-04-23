@@ -1,9 +1,9 @@
-import { ArrowLeft, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 
-import { useAddExchange, useExchangeBalance, useExchanges, useRemoveExchange, useSupportedExchanges } from '../hooks/useExchanges'
+import { useAddExchange, useExchanges, useRemoveExchange, useSupportedExchanges } from '../hooks/useExchanges'
 import { AddExchangePayload, Exchange } from '../types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,25 +12,38 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 const UI_SUPPORTED_EXCHANGES = ['okx']
+const WORKER_IP = '35.198.209.195'
+
+function StatusBadge({ status }: { status: Exchange['status'] }) {
+  if (status === 'verified') {
+    return <Badge variant="success" className="text-[10px]">✓ Verified</Badge>
+  }
+  if (status === 'invalid') {
+    return <Badge variant="destructive" className="text-[10px]">✗ Invalid</Badge>
+  }
+  return <Badge variant="secondary" className="text-[10px]">⏳ Validating…</Badge>
+}
 
 function ExchangeCard({ exc, onDelete, deleteDisabled }: {
   exc: Exchange
   onDelete: (id: string) => void
   deleteDisabled: boolean
 }) {
-  const { data: balanceData, isLoading: balanceLoading, refetch } = useExchangeBalance(exc.exchange_id)
+  const hasCachedBalance = exc.status === 'verified' && exc.balance_usdt_free != null
+  const updatedAt = exc.balance_updated_at
+    ? new Date(exc.balance_updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : null
 
   return (
     <Card className="mx-5 mb-3 p-4">
       <div className="flex justify-between items-start">
         <div className="flex-1 min-w-0">
-          <div className="text-foreground font-bold text-sm flex items-center gap-2">
+          <div className="text-foreground font-bold text-sm flex items-center gap-2 flex-wrap">
             {exc.exchange_id.toUpperCase()}
             {exc.is_default && (
-              <Badge variant="default" className="text-[10px]">
-                DEFAULT
-              </Badge>
+              <Badge variant="default" className="text-[10px]">DEFAULT</Badge>
             )}
+            <StatusBadge status={exc.status} />
           </div>
           {exc.label && (
             <div className="text-muted-foreground text-xs mt-0.5">{exc.label}</div>
@@ -41,39 +54,32 @@ function ExchangeCard({ exc, onDelete, deleteDisabled }: {
 
           {/* Balance section */}
           <div className="mt-2 pt-2 border-t border-border">
-            {balanceLoading ? (
-              <div className="text-muted-foreground text-xs flex items-center gap-1.5">
-                <RefreshCw size={10} className="animate-spin" />
-                Loading balance…
-              </div>
-            ) : balanceData?.error ? (
+            {exc.status === 'pending' && (
+              <div className="text-muted-foreground text-xs">Awaiting validation from worker…</div>
+            )}
+            {exc.status === 'invalid' && (
               <div className="text-destructive text-xs">
-                ⚠ {balanceData.error.length > 80 ? 'Invalid credentials or connection error' : balanceData.error}
+                ⚠ Invalid credentials or IP not whitelisted ({WORKER_IP})
               </div>
-            ) : balanceData?.accounts && balanceData.accounts.length > 0 ? (
-              <div className="flex flex-wrap gap-3">
-                {balanceData.accounts.map((acc) => (
-                  <div key={acc.label}>
-                    <div className="text-muted-foreground text-[10px] uppercase tracking-wide">{acc.label}</div>
-                    <div className="text-foreground text-sm font-semibold">
-                      {acc.usdt_free.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
-                    </div>
-                    {acc.usdt_total !== acc.usdt_free && (
-                      <div className="text-muted-foreground text-[10px]">
-                        Total: {acc.usdt_total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    )}
+            )}
+            {hasCachedBalance && (
+              <div className="flex items-end gap-3">
+                <div>
+                  <div className="text-muted-foreground text-[10px] uppercase tracking-wide">Trading</div>
+                  <div className="text-foreground text-sm font-semibold">
+                    {exc.balance_usdt_free!.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
                   </div>
-                ))}
-                <button
-                  onClick={() => refetch()}
-                  className="text-muted-foreground hover:text-foreground transition-colors self-end mb-0.5"
-                  title="Refresh balance"
-                >
-                  <RefreshCw size={11} />
-                </button>
+                  {exc.balance_usdt_total != null && exc.balance_usdt_total !== exc.balance_usdt_free && (
+                    <div className="text-muted-foreground text-[10px]">
+                      Total: {exc.balance_usdt_total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                  )}
+                </div>
+                {updatedAt && (
+                  <div className="text-muted-foreground text-[10px] mb-0.5">updated {updatedAt}</div>
+                )}
               </div>
-            ) : null}
+            )}
           </div>
         </div>
 
@@ -104,7 +110,6 @@ export default function Exchanges() {
 
   const { data: exchanges = [] } = useExchanges()
   const { data: supportedData } = useSupportedExchanges()
-  // Filter to UI-supported exchanges only (OKX)
   const supported = (supportedData?.exchanges ?? []).filter((id) =>
     UI_SUPPORTED_EXCHANGES.includes(id)
   )
@@ -167,7 +172,12 @@ export default function Exchanges() {
 
       {showForm && (
         <Card className="mx-5 mt-4 p-5">
-          <h2 className="text-foreground font-semibold text-sm mb-4">Connect New Exchange</h2>
+          <h2 className="text-foreground font-semibold text-sm mb-1">Connect New Exchange</h2>
+          <p className="text-muted-foreground text-xs mb-4">
+            Your API key must allow IP{' '}
+            <span className="font-mono font-semibold text-foreground">{WORKER_IP}</span>
+            {' '}(our trading server).
+          </p>
 
           {addExchange.error && (
             <p className="text-destructive text-xs mb-3">

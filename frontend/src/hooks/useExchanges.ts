@@ -7,6 +7,14 @@ export function useExchanges() {
   return useQuery({
     queryKey: ['exchanges'],
     queryFn: exchangesApi.getExchanges,
+    // Poll every 5s when any exchange is still being validated
+    refetchInterval: (query) => {
+      const data = query.state.data
+      if (Array.isArray(data) && data.some((e) => e.status === 'pending')) {
+        return 5000
+      }
+      return false
+    },
   })
 }
 

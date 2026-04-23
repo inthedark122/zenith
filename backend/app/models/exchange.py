@@ -1,12 +1,18 @@
 from datetime import datetime
+from typing import Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
 
 # Supported exchange IDs (ccxt identifiers)
 SUPPORTED_EXCHANGES = ["okx", "binance", "bybit", "kucoin", "gate"]
+
+# Exchange validation/sync status values
+EXCHANGE_STATUS_PENDING = "pending"
+EXCHANGE_STATUS_VERIFIED = "verified"
+EXCHANGE_STATUS_INVALID = "invalid"
 
 
 class UserExchange(Base):
@@ -16,6 +22,11 @@ class UserExchange(Base):
     Each user can connect multiple exchanges.  The ``is_default`` flag marks
     which connection is used when no explicit exchange is specified.  Only one
     connection per (user, exchange_id) pair is allowed.
+
+    The ``status`` field is managed by the trading worker:
+    - ``pending``  — just added, not yet validated
+    - ``verified`` — credentials confirmed, balance refreshed periodically
+    - ``invalid``  — validation failed (wrong key or IP restriction)
     """
 
     __tablename__ = "user_exchanges"
@@ -29,6 +40,13 @@ class UserExchange(Base):
     api_secret = Column(String, nullable=False)
     passphrase = Column(String, nullable=True)     # required by OKX, optional elsewhere
     is_default = Column(Boolean, default=False)
+
+    # Worker-managed validation & balance cache
+    status = Column(String, nullable=False, default=EXCHANGE_STATUS_PENDING)
+    balance_usdt_free = Column(Float, nullable=True)
+    balance_usdt_total = Column(Float, nullable=True)
+    balance_updated_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

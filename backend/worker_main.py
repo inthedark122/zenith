@@ -1,8 +1,13 @@
 """Trading Worker — standalone entry point.
 
-Runs the market-listener orchestrator as a dedicated process (Hetzner VPS).
+Runs the market-listener orchestrator as a dedicated process (GCP COS).
 Acquires a Postgres advisory lock before starting to prevent duplicate
 execution if two instances are accidentally launched at the same time.
+
+Three concurrent async loops:
+  - market_listener_loop  — polls market data, dispatches strategy workers
+  - validation_loop       — validates new exchange credentials via LISTEN/NOTIFY
+  - exchange_sync_loop    — refreshes cached USDT balance every 5 min
 """
 
 import asyncio
@@ -12,7 +17,9 @@ import sys
 from sqlalchemy import text
 
 from app.db.session import SessionLocal
+from app.workers.exchange_sync_loop import exchange_sync_loop
 from app.workers.market_listener import market_listener_loop
+from app.workers.validation_loop import validation_loop
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,7 +46,11 @@ async def main() -> None:
             sys.exit(1)
 
         log.info("Singleton advisory lock acquired. Trading worker starting.")
-        await market_listener_loop()
+        await asyncio.gather(
+            market_listener_loop(),
+            validation_loop(),
+            exchange_sync_loop(),
+        )
     finally:
         lock_session.close()
 

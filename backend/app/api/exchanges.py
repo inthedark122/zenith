@@ -1,19 +1,21 @@
+import json
 from typing import List
 
-import ccxt
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user, get_db
 from app.models.exchange import SUPPORTED_EXCHANGES, UserExchange
 from app.models.user import User
+from app.models.validation_task import ExchangeValidationTask
 from app.schemas.exchange import (
-    ExchangeBalanceResponse,
     ExchangeAccountBalance,
+    ExchangeBalanceResponse,
     UserExchangeCreate,
     UserExchangeResponse,
     UserExchangeUpdate,
 )
+from app.utils.pg_notify import pg_notify, pg_wait_for_notification
 
 router = APIRouter(prefix="/exchanges", tags=["exchanges"])
 
@@ -39,12 +41,12 @@ def list_user_exchanges(
 
 
 @router.post("", response_model=UserExchangeResponse, status_code=status.HTTP_201_CREATED)
-def add_exchange(
+async def add_exchange(
     payload: UserExchangeCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Connect a new exchange to the current user's account."""
+    """Connect a new exchange. Credentials are saved then validated via the trading worker."""
     # Check for duplicate (user_id, exchange_id) — one connection per exchange
     existing = (
         db.query(UserExchange)
@@ -69,7 +71,6 @@ def add_exchange(
     is_default = payload.is_default or (existing_count == 0)
 
     if is_default:
-        # Clear any existing default
         db.query(UserExchange).filter(
             UserExchange.user_id == current_user.id,
             UserExchange.is_default == True,  # noqa: E712
@@ -83,9 +84,34 @@ def add_exchange(
         api_secret=payload.api_secret,
         passphrase=payload.passphrase,
         is_default=is_default,
+        status="pending",
     )
     db.add(exc)
+    db.flush()  # assign exc.id
+
+    # Create a validation task so the worker can pick up credentials
+    task = ExchangeValidationTask(
+        user_id=current_user.id,
+        exchange_id=payload.exchange_id,
+        api_key=payload.api_key,
+        api_secret=payload.api_secret,
+        passphrase=payload.passphrase,
+    )
+    db.add(task)
     db.commit()
+    db.refresh(exc)
+    db.refresh(task)
+
+    # Notify the worker and wait up to 15s for the validation result
+    try:
+        await pg_notify("exchange_validation", str(task.id))
+        raw = await pg_wait_for_notification(f"validation_result_{task.id}", timeout=15)
+        if raw is not None:
+            result = json.loads(raw)
+            db.refresh(exc)
+    except Exception:
+        pass  # Return with status=pending on any notification error
+
     db.refresh(exc)
     return exc
 
@@ -96,7 +122,7 @@ def get_exchange_balance(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Fetch live USDT balance from the connected exchange account."""
+    """Return cached USDT balance from the DB (populated by the trading worker)."""
     exc = (
         db.query(UserExchange)
         .filter(
@@ -108,38 +134,21 @@ def get_exchange_balance(
     if exc is None:
         raise HTTPException(status_code=404, detail="Exchange connection not found")
 
-    exchange_cls = getattr(ccxt, exchange_id, None)
-    if exchange_cls is None:
-        raise HTTPException(status_code=400, detail=f"Unsupported exchange: {exchange_id}")
+    if exc.status != "verified" or exc.balance_usdt_free is None:
+        return ExchangeBalanceResponse(accounts=[], last_updated=None)
 
-    try:
-        client = exchange_cls({
-            "enableRateLimit": True,
-            "apiKey": exc.api_key,
-            "secret": exc.api_secret,
-            "password": exc.passphrase or "",
-        })
-
-        # OKX uses a single unified Trading account for spot + derivatives
-        if exchange_id == "okx":
-            raw = client.fetch_balance({"type": "trading"})
-            free = float(raw.get("free", {}).get("USDT", 0.0))
-            total = float(raw.get("total", {}).get("USDT", 0.0))
-            accounts = [ExchangeAccountBalance(label="Trading", usdt_free=free, usdt_total=total)]
-        else:
-            raw = client.fetch_balance()
-            free = float(raw.get("free", {}).get("USDT", 0.0))
-            total = float(raw.get("total", {}).get("USDT", 0.0))
-            accounts = [ExchangeAccountBalance(label="Spot", usdt_free=free, usdt_total=total)]
-
-        return ExchangeBalanceResponse(accounts=accounts)
-
-    except Exception as exc_err:
-        return ExchangeBalanceResponse(accounts=[], error=str(exc_err))
+    accounts = [
+        ExchangeAccountBalance(
+            label="Trading",
+            usdt_free=exc.balance_usdt_free,
+            usdt_total=exc.balance_usdt_total or exc.balance_usdt_free,
+        )
+    ]
+    return ExchangeBalanceResponse(accounts=accounts, last_updated=exc.balance_updated_at)
 
 
 @router.put("/{exchange_id}", response_model=UserExchangeResponse)
-def update_exchange(
+async def update_exchange(
     exchange_id: str,
     payload: UserExchangeUpdate,
     db: Session = Depends(get_db),
@@ -157,23 +166,55 @@ def update_exchange(
     if exc is None:
         raise HTTPException(status_code=404, detail="Exchange connection not found")
 
+    credentials_changed = False
     if payload.label is not None:
         exc.label = payload.label
     if payload.api_key is not None:
         exc.api_key = payload.api_key
+        credentials_changed = True
     if payload.api_secret is not None:
         exc.api_secret = payload.api_secret
+        credentials_changed = True
     if payload.passphrase is not None:
         exc.passphrase = payload.passphrase
+        credentials_changed = True
     if payload.is_default is True:
-        # Clear other defaults first
         db.query(UserExchange).filter(
             UserExchange.user_id == current_user.id,
             UserExchange.is_default == True,  # noqa: E712
         ).update({"is_default": False})
         exc.is_default = True
 
+    if credentials_changed:
+        exc.status = "pending"
+        exc.balance_usdt_free = None
+        exc.balance_usdt_total = None
+        exc.balance_updated_at = None
+
+    task = None
+    if credentials_changed:
+        task = ExchangeValidationTask(
+            user_id=current_user.id,
+            exchange_id=exchange_id,
+            api_key=exc.api_key,
+            api_secret=exc.api_secret,
+            passphrase=exc.passphrase,
+        )
+        db.add(task)
+
     db.commit()
+    db.refresh(exc)
+
+    if credentials_changed and task is not None:
+        db.refresh(task)
+        try:
+            await pg_notify("exchange_validation", str(task.id))
+            raw = await pg_wait_for_notification(f"validation_result_{task.id}", timeout=15)
+            if raw is not None:
+                db.refresh(exc)
+        except Exception:
+            pass
+
     db.refresh(exc)
     return exc
 

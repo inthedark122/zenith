@@ -36,6 +36,10 @@ class UserExchangeResponse(BaseModel):
     exchange_id: str
     label: Optional[str]
     is_default: bool
+    status: str
+    balance_usdt_free: Optional[float] = None
+    balance_usdt_total: Optional[float] = None
+    balance_updated_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -53,4 +57,5 @@ class ExchangeAccountBalance(BaseModel):
 
 class ExchangeBalanceResponse(BaseModel):
     accounts: List[ExchangeAccountBalance]
+    last_updated: Optional[datetime] = None
     error: Optional[str] = None
