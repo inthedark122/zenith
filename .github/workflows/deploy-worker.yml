@@ -75,3 +75,29 @@ jobs:
             --zone=${{ vars.GCP_ZONE }} \
             --project=${{ vars.GCP_PROJECT_ID }} \
             --container-image="$IMAGE"
+
+      - name: Delete old images (keep 5 most recent)
+        run: |
+          REPO="${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/zenith/zenith-worker"
+
+          # List all image digests sorted newest-first, skip the 5 most recent
+          OLD_DIGESTS=$(gcloud artifacts docker images list "$REPO" \
+            --include-tags \
+            --sort-by="~UPDATE_TIME" \
+            --format="value(version)" \
+            --project=${{ vars.GCP_PROJECT_ID }} \
+            | tail -n +6)
+
+          if [ -z "$OLD_DIGESTS" ]; then
+            echo "Nothing to clean up."
+            exit 0
+          fi
+
+          echo "Deleting $(echo "$OLD_DIGESTS" | wc -l | tr -d ' ') old image(s)..."
+          while IFS= read -r DIGEST; do
+            echo "  Deleting $REPO@$DIGEST"
+            gcloud artifacts docker images delete "$REPO@$DIGEST" \
+              --delete-tags \
+              --quiet \
+              --project=${{ vars.GCP_PROJECT_ID }} || true
+          done <<< "$OLD_DIGESTS"
