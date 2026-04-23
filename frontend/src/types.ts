@@ -171,6 +171,7 @@ export interface Worker {
   exchange_id: string
   user_exchange_id?: number | null
   selected_symbols?: string[] | null
+  strategy_symbols?: string[]
   margin: string
   started_at?: string
   stopped_at?: string

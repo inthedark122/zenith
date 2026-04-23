@@ -58,3 +58,4 @@ class StrategyWorker(Base):
     user = relationship("User", back_populates="strategy_workers")
     strategy = relationship("Strategy", back_populates="workers")
     trades = relationship("StrategyTrade", back_populates="worker")
+    user_exchange = relationship("UserExchange", foreign_keys=[user_exchange_id])

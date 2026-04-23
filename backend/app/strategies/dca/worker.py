@@ -30,6 +30,11 @@ from typing import Dict, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.exchange.order_executor import (
+    build_authenticated_exchange,
+    close_long_position,
+    open_long_position,
+)
 from app.models.trade import StrategyTrade, TradeStatus
 from app.models.worker import StrategyWorker
 from app.strategies.dca.strategy import (
@@ -56,10 +61,23 @@ def run_for_worker(
     2. If no open orders → start a new cycle (order #1 at market).
     3. If open orders exist:
        a. Recalculate avg entry and TP.
-       b. If current price ≥ TP → close all orders as WIN.
+       b. If current price ≥ TP → close all orders as WIN (close exchange position).
        c. Else if price dropped ≥ step_percent from last entry
           and order_count < max_orders → open next safety order.
+
+    Exchange integration
+    --------------------
+    worker.user_exchange_id must be set. If it is None, trades are skipped.
+    Real market orders are placed via CCXT. If an order fails (e.g. min size),
+    the trade is skipped for this cycle but the worker loop continues.
     """
+    if worker.user_exchange_id is None or worker.user_exchange is None:
+        log.warning(
+            "Worker #%d: no exchange connected — skipping (connect an API key to trade)",
+            worker.id,
+        )
+        return
+
     strategy = worker.strategy
     settings = strategy.settings or {}
 
@@ -68,8 +86,20 @@ def run_for_worker(
     max_orders: int = int(settings.get("max_orders", 5))
     take_profit_percent: float = float(settings.get("take_profit_percent", 1.0))
 
+    # Respect the user's token selection (empty list = trade all strategy symbols)
+    allowed_symbols: set = set(worker.selected_symbols or [])
+
+    # Build authenticated exchange client once per worker cycle
+    try:
+        exchange_client = build_authenticated_exchange(worker.user_exchange)
+    except Exception as exc:
+        log.error("Worker #%d: cannot build exchange client: %s", worker.id, exc)
+        return
+
     for sym_cfg in (strategy.symbols or []):
         symbol: str = sym_cfg["symbol"] if isinstance(sym_cfg, dict) else sym_cfg
+        if allowed_symbols and symbol not in allowed_symbols:
+            continue
         sym_market_type: str = sym_cfg.get("market_type", "spot") if isinstance(sym_cfg, dict) else "spot"
         sym_leverage: int = int(sym_cfg.get("leverage", 1)) if isinstance(sym_cfg, dict) else 1
 
@@ -94,6 +124,21 @@ def run_for_worker(
             # ── Start new DCA cycle ────────────────────────────────────────
             initial_amount = float(worker.margin)
             tp_price = calculate_take_profit(current_price, take_profit_percent)
+
+            # Place real exchange order
+            result = open_long_position(
+                exchange_client, symbol, initial_amount, sym_leverage, sym_market_type
+            )
+            if result["skipped"]:
+                log.warning(
+                    "Worker #%d: DCA order #1 for %s skipped (exchange error: %s)",
+                    worker.id, symbol, result.get("error"),
+                )
+                continue
+
+            filled_price = result["filled_price"] or current_price
+            contracts = result["contracts"]
+
             trade = StrategyTrade(
                 user_id=worker.user_id,
                 worker_id=worker.id,
@@ -104,20 +149,22 @@ def run_for_worker(
                 trade_date=date.today(),
                 details={
                     "dca_order_number": 1,
-                    "entry_price": str(current_price),
+                    "entry_price": str(filled_price),
                     "amount": str(initial_amount),
-                    "avg_entry_price": str(current_price),
+                    "contracts": str(contracts),
+                    "avg_entry_price": str(filled_price),
                     "take_profit_price": str(tp_price),
                     "margin": str(initial_amount),
                     "leverage": sym_leverage,
                     "market_type": sym_market_type,
+                    "order_id": result["order_id"],
                 },
             )
             db.add(trade)
             log.info(
                 "Worker #%d: DCA cycle started for %s @ %.4f "
-                "(order #1, $%.2f, TP=%.4f)",
-                worker.id, symbol, current_price, initial_amount, tp_price,
+                "(order #1, $%.2f, TP=%.4f, order_id=%s)",
+                worker.id, symbol, filled_price, initial_amount, tp_price, result["order_id"],
             )
             continue
 
@@ -131,6 +178,21 @@ def run_for_worker(
 
         # ── Check take profit ──────────────────────────────────────────────
         if current_price >= tp_price:
+            # Close full position on exchange
+            total_contracts = sum(
+                float(t.details.get("contracts") or t.details.get("amount") or 0)
+                for t in open_orders
+            )
+            if total_contracts > 0:
+                close_result = close_long_position(
+                    exchange_client, symbol, total_contracts, sym_market_type
+                )
+                if close_result["error"]:
+                    log.warning(
+                        "Worker #%d: failed to close %s on exchange: %s",
+                        worker.id, symbol, close_result["error"],
+                    )
+
             for t in open_orders:
                 t.status = TradeStatus.WIN
             log.info(
@@ -154,7 +216,20 @@ def run_for_worker(
         prev_amount = float(open_orders[-1].details["amount"])
         next_amount = calculate_next_amount(prev_amount, amount_multiplier)
 
-        new_avg_entry = calculate_avg_entry(entries + [(current_price, next_amount)])
+        result = open_long_position(
+            exchange_client, symbol, next_amount, sym_leverage, sym_market_type
+        )
+        if result["skipped"]:
+            log.warning(
+                "Worker #%d: DCA safety order #%d for %s skipped: %s",
+                worker.id, order_count + 1, symbol, result.get("error"),
+            )
+            continue
+
+        filled_price = result["filled_price"] or current_price
+        contracts = result["contracts"]
+
+        new_avg_entry = calculate_avg_entry(entries + [(filled_price, next_amount)])
         new_tp_price = calculate_take_profit(new_avg_entry, take_profit_percent)
 
         # Update TP on all existing open orders so the UI stays consistent
@@ -176,19 +251,21 @@ def run_for_worker(
             trade_date=date.today(),
             details={
                 "dca_order_number": order_count + 1,
-                "entry_price": str(current_price),
+                "entry_price": str(filled_price),
                 "amount": str(next_amount),
+                "contracts": str(contracts),
                 "avg_entry_price": str(new_avg_entry),
                 "take_profit_price": str(new_tp_price),
                 "margin": str(next_amount),
                 "leverage": sym_leverage,
                 "market_type": sym_market_type,
+                "order_id": result["order_id"],
             },
         )
         db.add(trade)
         log.info(
             "Worker #%d: DCA safety order #%d for %s @ %.4f "
-            "(drop=%.2f%%, $%.2f, avg=%.4f, TP=%.4f)",
-            worker.id, order_count + 1, symbol, current_price,
-            drop_pct, next_amount, new_avg_entry, new_tp_price,
+            "(drop=%.2f%%, $%.2f, avg=%.4f, TP=%.4f, order_id=%s)",
+            worker.id, order_count + 1, symbol, filled_price,
+            drop_pct, next_amount, new_avg_entry, new_tp_price, result["order_id"],
         )

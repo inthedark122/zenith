@@ -29,6 +29,11 @@ from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 
+from app.exchange.order_executor import (
+    build_authenticated_exchange,
+    close_long_position,
+    open_long_position,
+)
 from app.models.trade import StrategyTrade, TradeStatus
 from app.models.worker import StrategyWorker
 from app.strategies.dca_macd_daily.strategy import (
@@ -57,9 +62,27 @@ def run_for_worker(
        b. Check daily margin cap (max_daily_margin_usd from Strategy).
        c. If a D1 bullish crossover is cached for this symbol → open a trade.
     2. For every open trade owned by this worker:
-       a. Check if current price ≥ take_profit_price → close as win.
-       b. Check if current price ≤ stop_loss_price  → close as loss.
+       a. Check if current price ≥ take_profit_price → close as win (exchange sell).
+       b. Check if current price ≤ stop_loss_price  → close as loss (exchange sell).
+
+    Exchange integration
+    --------------------
+    worker.user_exchange_id must be set; trades are skipped if not.
     """
+    if worker.user_exchange_id is None or worker.user_exchange is None:
+        log.warning(
+            "Worker #%d: no exchange connected — skipping (connect an API key to trade)",
+            worker.id,
+        )
+        return
+
+    # Build authenticated exchange client once per worker cycle
+    try:
+        exchange_client = build_authenticated_exchange(worker.user_exchange)
+    except Exception as exc:
+        log.error("Worker #%d: cannot build exchange client: %s", worker.id, exc)
+        return
+
     strategy = worker.strategy
     today = date.today()
     margin = float(worker.margin)
@@ -69,11 +92,16 @@ def run_for_worker(
     max_daily_trades: int = int(settings.get("max_daily_trades", 2))
     max_daily_margin_usd: float = float(settings.get("max_daily_margin_usd", 0.0))
 
+    # Respect the user's token selection (empty list = trade all strategy symbols)
+    allowed_symbols: set = set(worker.selected_symbols or [])
+
     # ------------------------------------------------------------------
     # 1.  Evaluate entry signals for each symbol
     # ------------------------------------------------------------------
     for sym_cfg in (strategy.symbols or []):
         symbol: str = sym_cfg["symbol"] if isinstance(sym_cfg, dict) else sym_cfg
+        if allowed_symbols and symbol not in allowed_symbols:
+            continue
         sym_market_type: str = sym_cfg.get("market_type", "spot") if isinstance(sym_cfg, dict) else "spot"
         sym_leverage: float = float(sym_cfg.get("leverage", strategy.leverage)) if isinstance(sym_cfg, dict) else strategy.leverage
 
@@ -134,18 +162,32 @@ def run_for_worker(
             )
             continue
 
+        # Place real exchange order
+        result = open_long_position(
+            exchange_client, symbol, margin, int(sym_leverage), sym_market_type
+        )
+        if result["skipped"]:
+            log.warning(
+                "Worker #%d: MACD entry #%d for %s skipped (exchange error: %s)",
+                worker.id, entry_number, symbol, result.get("error"),
+            )
+            continue
+
+        filled_price = result["filled_price"] or current_price
+        contracts = result["contracts"]
+
         timeframe = "1d" if entry_number == 1 else "15m"
         leverage = sym_leverage
         rr_ratio = strategy.rr_ratio
 
         tp = calculate_take_profit(
-            entry_price=current_price,
+            entry_price=filled_price,
             margin=margin,
             leverage=leverage,
             rr_ratio=rr_ratio,
         )
         sl = calculate_stop_loss(
-            entry_price=current_price,
+            entry_price=filled_price,
             margin=margin,
             leverage=leverage,
         )
@@ -161,19 +203,21 @@ def run_for_worker(
             details={
                 "timeframe": timeframe,
                 "entry_number": entry_number,
-                "entry_price": str(current_price),
+                "entry_price": str(filled_price),
                 "take_profit_price": str(tp),
                 "stop_loss_price": str(sl),
                 "margin": str(margin),
+                "contracts": str(contracts),
                 "leverage": leverage,
                 "rr_ratio": rr_ratio,
                 "market_type": sym_market_type,
+                "order_id": result["order_id"],
             },
         )
         db.add(trade)
         log.info(
-            "Worker #%d: opened %s LONG entry #%d at %.4f (TP %.4f / SL %.4f)",
-            worker.id, symbol, entry_number, current_price, tp, sl,
+            "Worker #%d: opened %s LONG entry #%d at %.4f (TP %.4f / SL %.4f, order_id=%s)",
+            worker.id, symbol, entry_number, filled_price, tp, sl, result["order_id"],
         )
 
     # ------------------------------------------------------------------
@@ -201,15 +245,32 @@ def run_for_worker(
         tp_price = float(tp_str)
         sl_price = float(sl_str)
 
-        if current_price >= tp_price:
-            trade.status = TradeStatus.WIN
-            log.info(
-                "Worker #%d trade #%d (%s) HIT TP at %.4f (TP=%.4f)",
-                worker.id, trade.id, trade.symbol, current_price, tp_price,
-            )
-        elif current_price <= sl_price:
-            trade.status = TradeStatus.LOSS
-            log.info(
-                "Worker #%d trade #%d (%s) HIT SL at %.4f (SL=%.4f)",
-                worker.id, trade.id, trade.symbol, current_price, sl_price,
-            )
+        hit_tp = current_price >= tp_price
+        hit_sl = current_price <= sl_price
+
+        if hit_tp or hit_sl:
+            # Close position on exchange
+            sym_market_type = details.get("market_type", "spot")
+            contracts = float(details.get("contracts") or 0)
+            if contracts > 0:
+                close_result = close_long_position(
+                    exchange_client, trade.symbol, contracts, sym_market_type
+                )
+                if close_result["error"]:
+                    log.warning(
+                        "Worker #%d: failed to close %s on exchange: %s",
+                        worker.id, trade.symbol, close_result["error"],
+                    )
+
+            if hit_tp:
+                trade.status = TradeStatus.WIN
+                log.info(
+                    "Worker #%d trade #%d (%s) HIT TP at %.4f (TP=%.4f)",
+                    worker.id, trade.id, trade.symbol, current_price, tp_price,
+                )
+            else:
+                trade.status = TradeStatus.LOSS
+                log.info(
+                    "Worker #%d trade #%d (%s) HIT SL at %.4f (SL=%.4f)",
+                    worker.id, trade.id, trade.symbol, current_price, sl_price,
+                )

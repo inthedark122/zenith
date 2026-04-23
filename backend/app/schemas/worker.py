@@ -28,6 +28,7 @@ class WorkerResponse(BaseModel):
     exchange_id: str
     user_exchange_id: Optional[int] = None
     selected_symbols: Optional[List[str]] = None
+    strategy_symbols: List[str] = []
     status: str
     started_at: Optional[datetime]
     stopped_at: Optional[datetime]
@@ -35,6 +36,19 @@ class WorkerResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @classmethod
+    def model_validate(cls, obj, *args, **kwargs):
+        instance = super().model_validate(obj, *args, **kwargs)
+        # Populate strategy_symbols from the related strategy
+        try:
+            syms = obj.strategy.symbols or []
+            instance.strategy_symbols = [
+                (s["symbol"] if isinstance(s, dict) else s) for s in syms
+            ]
+        except Exception:
+            pass
+        return instance
 
 
 class WorkerStopResponse(WorkerResponse):

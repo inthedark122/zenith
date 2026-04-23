@@ -384,6 +384,10 @@ function StrategyCard({
               ? 'All slots in use'
               : !subscription
               ? 'Subscription required'
+              : verifiedExchanges.length === 0
+              ? 'Connect API key first'
+              : selectedSymbols.length === 0
+              ? 'Select at least one token'
               : '▶ Start Worker'}
           </Button>
         </div>
@@ -436,13 +440,21 @@ function WorkerRow({ worker, trades }: { worker: Worker; trades: Trade[] }) {
         </div>
         <Badge variant={isRunning ? 'success' : 'secondary'}>{worker.status.toUpperCase()}</Badge>
       </div>
-      {worker.selected_symbols && worker.selected_symbols.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-2">
-          {worker.selected_symbols.map((sym) => (
-            <Badge key={sym} variant="default" className="text-xs">{sym}</Badge>
-          ))}
-        </div>
-      )}
+      {(() => {
+        const activeTokens =
+          worker.selected_symbols && worker.selected_symbols.length > 0
+            ? worker.selected_symbols
+            : worker.strategy_symbols ?? [];
+        if (activeTokens.length === 0) return null;
+        return (
+          <div className="flex flex-wrap gap-1 mb-2 items-center">
+            <span className="text-muted-foreground text-xs mr-1">Trading:</span>
+            {activeTokens.map((sym) => (
+              <Badge key={sym} variant="default" className="text-xs">{sym}</Badge>
+            ))}
+          </div>
+        );
+      })()}
       <div className="flex gap-4 mb-3 flex-wrap text-xs">
         {workerDetails.map(({ label, value }) => (
           <div key={label}>
