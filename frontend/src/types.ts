@@ -179,23 +179,37 @@ export interface Worker {
 export interface TradeDetails {
   entry_number?: number
   dca_order_number?: number
+  cycle_id?: string
   timeframe?: string
   entry_price?: string
+  filled_price?: string
   avg_entry_price?: string
   take_profit_price?: string
+  tp_price?: string
+  tp_order_id?: string
+  tp_contracts?: string
   stop_loss_price?: string
+  contracts?: string
+  amount?: string
   margin?: string
   leverage?: number
   market_type?: 'spot' | 'swap'
+  order_id?: string
+  exit_price?: string
+  pnl_usdt?: string
+  pnl_pct?: string
+  cycle_closed_at?: string
 }
 
 export interface Trade {
   id: number
   worker_id: number
   symbol: string
-  status: 'open' | 'win' | 'loss'
+  status: 'open' | 'win' | 'loss' | 'pending' | 'closed' | 'stopped'
   exchange?: string
   details?: TradeDetails
+  created_at?: string
+  updated_at?: string
 }
 
 export interface LaunchWorkerPayload {

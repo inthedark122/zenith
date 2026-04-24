@@ -31,7 +31,7 @@ export function useTrades() {
   return useQuery({
     queryKey: ['trades'],
     queryFn: tradingApi.getTrades,
-    refetchInterval: 30_000,
+    refetchInterval: 5_000,
   })
 }
 
