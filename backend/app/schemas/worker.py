@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class WorkerLaunchRequest(BaseModel):
@@ -24,6 +24,16 @@ class WorkerResponse(BaseModel):
     selected_symbols: Optional[List[str]] = None
     symbol_margins: Dict[str, float] = {}
     strategy_symbols: List[str] = []
+
+    @field_validator("symbol_margins", mode="before")
+    @classmethod
+    def coerce_margins(cls, v: object) -> dict:
+        return v if isinstance(v, dict) else {}
+
+    @field_validator("strategy_symbols", mode="before")
+    @classmethod
+    def coerce_strategy_symbols(cls, v: object) -> list:
+        return v if isinstance(v, list) else []
     status: str
     started_at: Optional[datetime]
     stopped_at: Optional[datetime]
@@ -43,9 +53,6 @@ class WorkerResponse(BaseModel):
             ]
         except Exception:
             pass
-        # Ensure symbol_margins is a dict (may be None in DB)
-        if instance.symbol_margins is None:
-            instance.symbol_margins = {}
         return instance
 
 
