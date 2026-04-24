@@ -6,25 +6,19 @@ from pydantic import BaseModel
 
 class WorkerLaunchRequest(BaseModel):
     """
-    User-facing payload to start a strategy worker.
-
-    Users supply:
-    - strategy_id      — which admin-defined Strategy to run
-    - margin           — USDT margin per trade (validated against cached exchange balance)
-    - user_exchange_id — which verified exchange to use (None = auto-select default)
-    - selected_symbols — symbols from strategy presets the user wants to trade
+    Legacy payload to start a strategy worker (kept for backward compat).
+    Prefer POST /trading/tokens/start with symbol_margins instead.
     """
     strategy_id: int
-    margin: float
     user_exchange_id: Optional[int] = None
     selected_symbols: List[str] = []
+    symbol_margins: Optional[Dict[str, float]] = None
 
 
 class WorkerResponse(BaseModel):
     id: int
     user_id: int
     strategy_id: int
-    margin: float
     exchange_id: str
     user_exchange_id: Optional[int] = None
     selected_symbols: Optional[List[str]] = None
@@ -72,13 +66,11 @@ class TokenStartRequest(BaseModel):
     The backend transparently creates a new StrategyWorker or reuses the
     existing running one for the same (user, strategy, exchange) combination.
 
-    - margin is only required when no running worker exists yet.
-    - symbol_margins: per-symbol budget override; if omitted for a symbol, falls back to global margin.
+    - symbol_margins: per-symbol USDT budget {symbol: amount}. Required for new workers.
     - user_exchange_id: None = auto-select the user's default exchange.
     """
     strategy_id: int
     symbols: List[str]
-    margin: Optional[float] = None
     symbol_margins: Optional[Dict[str, float]] = None
     user_exchange_id: Optional[int] = None
 
@@ -101,45 +93,4 @@ class TokenStopResponse(BaseModel):
     message: str
 
 
-class WorkerStopResponse(WorkerResponse):
-    """Extended response returned when a worker is force-stopped."""
-    closed_trades_count: int = 0
-    message: str = ""
 
-
-# ---------------------------------------------------------------------------
-# Token-level start / stop (user-facing, worker is internal)
-# ---------------------------------------------------------------------------
-
-class TokenStartRequest(BaseModel):
-    """
-    Start trading specific symbols for a strategy.
-
-    The backend transparently creates a new StrategyWorker or reuses the
-    existing running one for the same (user, strategy, exchange) combination.
-
-    - margin is only required when no running worker exists yet.
-    - user_exchange_id: None = auto-select the user's default exchange.
-    """
-    strategy_id: int
-    symbols: List[str]
-    margin: Optional[float] = None
-    user_exchange_id: Optional[int] = None
-
-
-class TokenStopRequest(BaseModel):
-    """
-    Stop trading specific symbols for a strategy.
-
-    Symbols are liquidated on the exchange and removed from the running
-    worker.  If no symbols remain the worker is stopped automatically.
-    """
-    strategy_id: int
-    symbols: List[str]
-    user_exchange_id: Optional[int] = None
-
-
-class TokenStopResponse(BaseModel):
-    stopped_symbols: List[str]
-    worker_stopped: bool
-    message: str

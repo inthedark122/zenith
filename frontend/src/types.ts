@@ -172,7 +172,6 @@ export interface Worker {
   selected_symbols?: string[] | null
   symbol_margins?: Record<string, number>
   strategy_symbols?: string[]
-  margin: string
   started_at?: string
   stopped_at?: string
 }
@@ -201,15 +200,14 @@ export interface Trade {
 
 export interface LaunchWorkerPayload {
   strategy_id: number
-  margin: number
   user_exchange_id?: number
   selected_symbols: string[]
+  symbol_margins?: Record<string, number>
 }
 
 export interface TokenStartPayload {
   strategy_id: number
   symbols: string[]
-  margin?: number
   symbol_margins?: Record<string, number>
   user_exchange_id?: number
 }

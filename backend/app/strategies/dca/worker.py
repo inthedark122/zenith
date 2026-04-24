@@ -123,10 +123,14 @@ def run_for_worker(
 
         if order_count == 0:
             # ── Start new DCA cycle ────────────────────────────────────────
-            # Per-symbol budget: use symbol_margins override if set, else global margin.
-            symbol_budget = float(
-                (worker.symbol_margins or {}).get(symbol, float(worker.margin))
-            )
+            # Per-symbol budget from symbol_margins; skip if not configured.
+            symbol_budget = float((worker.symbol_margins or {}).get(symbol, 0))
+            if symbol_budget <= 0:
+                log.warning(
+                    "Worker #%d: no budget set for %s in symbol_margins — skipping",
+                    worker.id, symbol,
+                )
+                continue
             initial_amount = calculate_base_order(
                 symbol_budget, amount_multiplier, max_orders
             )

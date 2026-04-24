@@ -24,7 +24,6 @@ Subscription restrictions
 """
 
 from datetime import date, datetime
-from decimal import Decimal
 import logging
 from typing import List, Optional
 
@@ -274,30 +273,14 @@ def launch_worker(
             detail=f"Symbol(s) not in strategy: {', '.join(invalid_strategy)}",
         )
 
-    # 5. Validate margin against cached balance
-    margin = Decimal(str(payload.margin))
-    if margin <= Decimal("0"):
-        raise HTTPException(status_code=400, detail="Margin must be positive")
-
-    if user_exchange_row.balance_usdt_free is not None:
-        available = Decimal(str(user_exchange_row.balance_usdt_free))
-        if margin > available:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Insufficient balance: margin ${margin} USDT "
-                    f"> available ${available:.2f} USDT on {exchange_id}"
-                ),
-            )
-
-    # 6. Create worker
+    # 5. Create worker
     worker = StrategyWorker(
         user_id=current_user.id,
         strategy_id=payload.strategy_id,
-        margin=margin,
         exchange_id=exchange_id,
         user_exchange_id=user_exchange_row.id,
         selected_symbols=selected_symbols,
+        symbol_margins=dict(payload.symbol_margins) if payload.symbol_margins else {},
         status=WorkerStatus.RUNNING,
     )
     db.add(worker)
@@ -544,23 +527,9 @@ def start_tokens(
             ),
         )
 
-    # Margin is required when creating a new worker
-    if payload.margin is None or payload.margin <= 0:
-        raise HTTPException(status_code=400, detail="Budget (margin) is required when activating a strategy for the first time.")
-
-    margin = Decimal(str(payload.margin))
-    if user_exchange_row.balance_usdt_free is not None:
-        available = Decimal(str(user_exchange_row.balance_usdt_free))
-        if margin > available:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Insufficient balance: ${margin} USDT > available ${available:.2f} USDT",
-            )
-
     worker = StrategyWorker(
         user_id=current_user.id,
         strategy_id=payload.strategy_id,
-        margin=margin,
         exchange_id=user_exchange_row.exchange_id,
         user_exchange_id=user_exchange_row.id,
         selected_symbols=list(payload.symbols),

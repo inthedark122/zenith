@@ -85,7 +85,7 @@ def run_for_worker(
 
     strategy = worker.strategy
     today = date.today()
-    margin = float(worker.margin)
+    symbol_margins_map = worker.symbol_margins or {}
 
     # Read DCA_MACD_DAILY-specific settings from the Strategy.settings JSON field
     settings = strategy.settings or {}
@@ -104,6 +104,14 @@ def run_for_worker(
             continue
         sym_market_type: str = sym_cfg.get("market_type", "spot") if isinstance(sym_cfg, dict) else "spot"
         sym_leverage: float = float(sym_cfg.get("leverage", 1)) if isinstance(sym_cfg, dict) else 1.0
+
+        margin = float(symbol_margins_map.get(symbol, 0))
+        if margin <= 0:
+            log.warning(
+                "Worker #%d: no budget set for %s in symbol_margins — skipping",
+                worker.id, symbol,
+            )
+            continue
 
         signal = latest_signals.get(symbol)
         if signal is None:

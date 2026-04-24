@@ -63,7 +63,6 @@ function TokensPanel({
   )
 
   const activeSymbols: string[] = activeWorker?.selected_symbols ?? []
-  const currentMargin = activeWorker ? parseFloat(String(activeWorker.margin)) : null
 
   const allSymbols = (strategy.symbols ?? []).map((s) => s.symbol)
   const inactiveSymbols = allSymbols.filter((s) => !activeSymbols.includes(s))
@@ -143,7 +142,7 @@ function TokensPanel({
     return Object.values(perTokenMargins).reduce((sum, v) => sum + (parseFloat(v) || 0), 0)
   }, [marginMode, perTokenMargins])
 
-  const globalBudgetValid = currentMargin !== null || (groupBudget !== '' && totalBudget > 0)
+  const globalBudgetValid = groupBudget !== '' && totalBudget > 0
   const perTokenValid = enabledList.every((s) => (parseFloat(perTokenMargins[s] || '0') > 0))
 
   const planMax: Record<string, number> = { starter: 1, trader: 2, pro: 3 }
@@ -155,11 +154,9 @@ function TokensPanel({
     const syms = symbolsToStart.filter((s) => enabledTokens.has(s))
     if (syms.length === 0) return
     const symMargins = buildSymbolMargins(syms)
-    const globalMargin = marginMode === 'group' ? totalBudget : Math.max(...Object.values(symMargins))
     startTokens.mutate({
       strategy_id: strategy.id,
       symbols: syms,
-      margin: currentMargin ?? (globalMargin > 0 ? globalMargin : undefined),
       symbol_margins: symMargins,
       user_exchange_id: userExchangeId,
     })
@@ -235,15 +232,7 @@ function TokensPanel({
             Budget (USDT)
           </Label>
 
-          {currentMargin !== null ? (
-            /* Existing worker — show locked margin */
-            <div className="flex items-center gap-2">
-              <div className="bg-input border border-border rounded-lg px-3 py-2 text-sm text-foreground font-semibold w-28">
-                ${currentMargin.toFixed(2)}
-              </div>
-              <span className="text-muted-foreground text-xs">Active — budget locked</span>
-            </div>
-          ) : marginMode === 'group' ? (
+          {marginMode === 'group' ? (
             /* Group mode */
             <div className="space-y-2">
               <div className="flex items-center gap-2">
@@ -347,7 +336,7 @@ function TokensPanel({
                   </span>
 
                   {/* Amount field (only when enabled) */}
-                  {isEnabled && currentMargin === null && (
+                  {isEnabled && (
                     <div className="relative">
                       <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">$</span>
                       <Input
@@ -366,9 +355,6 @@ function TokensPanel({
                       />
                     </div>
                   )}
-                  {isEnabled && currentMargin !== null && (
-                    <span className="text-muted-foreground text-xs">${currentMargin.toFixed(2)}</span>
-                  )}
                 </div>
               )
             })}
@@ -383,7 +369,7 @@ function TokensPanel({
           <div className="flex flex-wrap gap-2">
             {activeSymbols.map((sym) => {
               const forStop = selectedForStop.includes(sym)
-              const tokenMargin = activeWorker?.symbol_margins?.[sym] ?? currentMargin
+              const tokenMargin = activeWorker?.symbol_margins?.[sym]
               return (
                 <button
                   key={sym}
@@ -415,25 +401,23 @@ function TokensPanel({
       <div className="flex flex-wrap gap-2 pt-1">
         {inactiveSymbols.length > 0 && enabledList.length > 0 && (
           <>
-            {(currentMargin !== null || globalBudgetValid) && (
-              <Button
-                size="sm"
-                onClick={() => handleStart(enabledList)}
-                disabled={
-                  startTokens.isPending ||
-                  (marginMode === 'per-token' && !perTokenValid) ||
-                  (marginMode === 'group' && !globalBudgetValid) ||
-                  (!activeWorker && !canStartNew)
-                }
-                className="bg-[#6c47ff] hover:bg-[#5a3de8] text-white text-xs"
-              >
-                {startTokens.isPending
-                  ? 'Starting…'
-                  : enabledList.length === inactiveSymbols.length
-                  ? `▶ Start All (${enabledList.length})`
-                  : `▶ Start ${enabledList.length} Token${enabledList.length !== 1 ? 's' : ''}`}
-              </Button>
-            )}
+            <Button
+              size="sm"
+              onClick={() => handleStart(enabledList)}
+              disabled={
+                startTokens.isPending ||
+                (marginMode === 'per-token' && !perTokenValid) ||
+                (marginMode === 'group' && !globalBudgetValid) ||
+                (!activeWorker && !canStartNew)
+              }
+              className="bg-[#6c47ff] hover:bg-[#5a3de8] text-white text-xs"
+            >
+              {startTokens.isPending
+                ? 'Starting…'
+                : enabledList.length === inactiveSymbols.length
+                ? `▶ Start All (${enabledList.length})`
+                : `▶ Start ${enabledList.length} Token${enabledList.length !== 1 ? 's' : ''}`}
+            </Button>
           </>
         )}
         {activeSymbols.length > 0 && (
