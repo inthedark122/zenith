@@ -123,10 +123,12 @@ def run_for_worker(
 
         if order_count == 0:
             # ── Start new DCA cycle ────────────────────────────────────────
-            # Derive the base order from the total budget so that all orders
-            # (if fully executed) sum to exactly worker.margin.
+            # Per-symbol budget: use symbol_margins override if set, else global margin.
+            symbol_budget = float(
+                (worker.symbol_margins or {}).get(symbol, float(worker.margin))
+            )
             initial_amount = calculate_base_order(
-                float(worker.margin), amount_multiplier, max_orders
+                symbol_budget, amount_multiplier, max_orders
             )
             tp_price = calculate_take_profit(current_price, take_profit_percent)
 

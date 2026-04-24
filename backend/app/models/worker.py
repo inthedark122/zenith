@@ -49,6 +49,7 @@ class StrategyWorker(Base):
     exchange_id = Column(String, nullable=False)
     user_exchange_id = Column(Integer, ForeignKey("user_exchanges.id"), nullable=True)
     selected_symbols = Column(JSON, nullable=True, default=list)
+    symbol_margins = Column(JSON, nullable=True, default=dict)  # {symbol: margin_usdt}
     status = Column(String, default=WorkerStatus.RUNNING)      # WorkerStatus
     started_at = Column(DateTime, default=datetime.utcnow)
     stopped_at = Column(DateTime, nullable=True)

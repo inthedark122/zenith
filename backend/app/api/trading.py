@@ -514,6 +514,13 @@ def start_tokens(
         current_syms = list(existing.selected_symbols or [])
         merged = current_syms + [s for s in payload.symbols if s not in current_syms]
         existing.selected_symbols = merged
+        # Merge per-symbol margins (new values override existing for the same symbol)
+        if payload.symbol_margins:
+            merged_margins = dict(existing.symbol_margins or {})
+            merged_margins.update(payload.symbol_margins)
+            existing.symbol_margins = merged_margins
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(existing, "symbol_margins")
         db.commit()
         db.refresh(existing)
         return existing
@@ -557,6 +564,7 @@ def start_tokens(
         exchange_id=user_exchange_row.exchange_id,
         user_exchange_id=user_exchange_row.id,
         selected_symbols=list(payload.symbols),
+        symbol_margins=dict(payload.symbol_margins) if payload.symbol_margins else {},
         status=WorkerStatus.RUNNING,
     )
     db.add(worker)
