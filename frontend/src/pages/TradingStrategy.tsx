@@ -1,4 +1,4 @@
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronUp, Square } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
@@ -22,11 +22,13 @@ function TokensPanel({
   exchanges,
   subscription,
   workers,
+  trades,
 }: {
   strategy: Strategy
   exchanges: Exchange[]
   subscription: Subscription | null
   workers: Worker[]
+  trades: Trade[]
 }) {
   const verifiedExchanges = exchanges.filter((e) => e.status === 'verified')
 
@@ -64,7 +66,7 @@ function TokensPanel({
   const [selectedInactive, setSelectedInactive] = useState<Set<string>>(
     () => new Set(inactiveSymbols),
   )
-  const [selectedForStop, setSelectedForStop] = useState<string[]>([])
+  const [stoppingSymbol, setStoppingSymbol] = useState<string | null>(null)
 
   const enabledList = inactiveSymbols.filter((s) => selectedInactive.has(s))
 
@@ -149,11 +151,11 @@ function TokensPanel({
     })
   }
 
-  const handleStopSelected = () => {
-    if (selectedForStop.length === 0) return
+  const handleStopSymbol = (sym: string) => {
+    setStoppingSymbol(sym)
     stopTokens.mutate(
-      { strategy_id: strategy.id, symbols: selectedForStop, user_exchange_id: userExchangeId },
-      { onSuccess: () => setSelectedForStop([]) },
+      { strategy_id: strategy.id, symbols: [sym], user_exchange_id: userExchangeId },
+      { onSettled: () => setStoppingSymbol(null) },
     )
   }
 
@@ -161,7 +163,6 @@ function TokensPanel({
     if (activeSymbols.length === 0) return
     stopTokens.mutate(
       { strategy_id: strategy.id, symbols: activeSymbols, user_exchange_id: userExchangeId },
-      { onSuccess: () => setSelectedForStop([]) },
     )
   }
 
@@ -196,7 +197,6 @@ function TokensPanel({
                 key={ex.id}
                 onClick={() => {
                   setSelectedExchangeId(String(ex.id))
-                  setSelectedForStop([])
                 }}
                 className={cn(
                   'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
@@ -285,10 +285,9 @@ function TokensPanel({
         <div className="grid grid-cols-2 gap-2">
           {allSymbols.map((sym) => {
             const isActive = activeSymbols.includes(sym)
-            const isSelectedForStop = selectedForStop.includes(sym)
             const isSelectedForStart = selectedInactive.has(sym)
             const isStarting = startPending && isSelectedForStart && !isActive
-            const isStopping = stopPending && isSelectedForStop && isActive
+            const isStopping = stoppingSymbol === sym
             const tokenBudget = activeWorker?.symbol_margins?.[sym]
             const displayAmount = isActive ? null : (
               marginMode === 'per-token'
@@ -298,51 +297,65 @@ function TokensPanel({
                 : ''
             )
 
+            // Find open lead trade for this symbol (dca_order_number = 1)
+            const openLeadTrade = trades.find(
+              (t) =>
+                t.symbol === sym &&
+                t.status === 'open' &&
+                t.details?.dca_order_number === 1 &&
+                activeWorker &&
+                t.worker_id === activeWorker.id,
+            )
+            const avgEntry = openLeadTrade?.details?.avg_entry_price
+            const tpPrice = openLeadTrade?.details?.take_profit_price || openLeadTrade?.details?.tp_price
+
             if (isActive) {
               return (
-                <button
+                <div
                   key={sym}
-                  onClick={() =>
-                    setSelectedForStop((prev) =>
-                      prev.includes(sym) ? prev.filter((s) => s !== sym) : [...prev, sym],
-                    )
-                  }
-                  disabled={isStopping}
-                  className={cn(
-                    'rounded-xl p-3 border text-left transition-all',
-                    isSelectedForStop
-                      ? 'bg-destructive/10 border-destructive/60'
-                      : 'bg-green-500/5 border-green-500/30 hover:border-green-500/60',
-                  )}
+                  className="rounded-xl p-3 border bg-green-500/5 border-green-500/30"
                 >
-                  <div className="flex items-start justify-between gap-1">
+                  <div className="flex items-start justify-between gap-1 mb-1.5">
                     <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 mb-0.5">
+                      <div className="flex items-center gap-1.5">
                         <span className={cn(
                           'w-1.5 h-1.5 rounded-full shrink-0',
-                          isStopping ? 'bg-muted-foreground animate-pulse' : 'bg-green-400',
+                          isStopping ? 'bg-muted-foreground animate-pulse' : 'bg-green-400 animate-pulse',
                         )} />
                         <span className="text-foreground text-sm font-semibold truncate">
                           {sym.replace('/USDT', '')}
                         </span>
                       </div>
-                      <span className="text-muted-foreground text-[11px]">USDT</span>
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className={cn(
-                        'text-[11px] font-medium mb-0.5',
-                        isSelectedForStop ? 'text-destructive' : 'text-green-400',
-                      )}>
-                        {isStopping ? 'Stopping…' : isSelectedForStop ? 'Stop?' : 'Active'}
-                      </div>
-                      {tokenBudget != null && (
-                        <div className="text-foreground text-xs font-semibold">
-                          ${Number(tokenBudget).toFixed(2)}
-                        </div>
+                    <button
+                      onClick={() => handleStopSymbol(sym)}
+                      disabled={isStopping || stopPending}
+                      title="Stop this token"
+                      className={cn(
+                        'flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded border transition-colors shrink-0',
+                        isStopping
+                          ? 'text-muted-foreground border-border cursor-not-allowed'
+                          : 'text-destructive border-destructive/40 hover:bg-destructive/10',
                       )}
-                    </div>
+                    >
+                      <Square size={9} />
+                      {isStopping ? 'Stopping' : 'Stop'}
+                    </button>
                   </div>
-                </button>
+                  <div className="text-[11px] text-muted-foreground space-y-0.5">
+                    {tokenBudget != null && (
+                      <div className="text-foreground font-semibold">${Number(tokenBudget).toFixed(2)}</div>
+                    )}
+                    {avgEntry ? (
+                      <div className="text-[#a78bfa]">
+                        Avg ${parseFloat(avgEntry).toFixed(4)}
+                        {tpPrice && <span className="text-muted-foreground"> · TP ${parseFloat(tpPrice).toFixed(4)}</span>}
+                      </div>
+                    ) : (
+                      <div className="text-muted-foreground/60">Waiting for cycle…</div>
+                    )}
+                  </div>
+                </div>
               )
             }
 
@@ -433,17 +446,7 @@ function TokensPanel({
               : `▶ Start ${enabledList.length} Token${enabledList.length !== 1 ? 's' : ''}`}
           </Button>
         )}
-        {selectedForStop.length > 0 && (
-          <Button
-            size="sm" variant="outline"
-            onClick={handleStopSelected}
-            disabled={stopPending}
-            className="border-destructive/50 text-destructive hover:bg-destructive/10 text-xs"
-          >
-            {stopPending ? 'Stopping…' : `⏹ Stop ${selectedForStop.length}`}
-          </Button>
-        )}
-        {activeSymbols.length > 0 && selectedForStop.length === 0 && (
+        {activeSymbols.length > 0 && (
           <Button
             size="sm" variant="outline"
             onClick={handleStopAll}
@@ -486,41 +489,174 @@ function TokensPanel({
 
 
 // ---------------------------------------------------------------------------
-// Trade item
+// Helpers
 // ---------------------------------------------------------------------------
 
-function TradeItem({ trade }: { trade: Trade }) {
-  const d = trade.details ?? {}
-  const isOpen = trade.status === 'open'
+function timeAgo(isoString?: string): string {
+  if (!isoString) return ''
+  const ms = Date.now() - new Date(isoString).getTime()
+  const mins = Math.floor(ms / 60_000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ${mins % 60}m ago`
+  return `${Math.floor(hrs / 24)}d ago`
+}
+
+function fmtPrice(v?: string | number | null): string {
+  if (v == null || v === '') return '—'
+  const n = parseFloat(String(v))
+  if (isNaN(n)) return '—'
+  return `$${n.toFixed(4)}`
+}
+
+// ---------------------------------------------------------------------------
+// Position card — one DCA cycle with all its order legs
+// ---------------------------------------------------------------------------
+
+interface CycleGroup {
+  cycleId: string
+  leadTrade: Trade
+  legs: Trade[]
+}
+
+function PositionCard({ group }: { group: CycleGroup }) {
+  const [expanded, setExpanded] = useState(false)
+  const { leadTrade, legs } = group
+  const d = leadTrade.details ?? {}
+
+  const isOpen = leadTrade.status === 'open'
+  const isWin = leadTrade.status === 'win'
+  const pnlUsdt = d.pnl_usdt ? parseFloat(d.pnl_usdt) : null
+  const pnlPct = d.pnl_pct ? parseFloat(d.pnl_pct) : null
+
+  // Sort legs by dca_order_number
+  const sortedLegs = [...legs].sort(
+    (a, b) => (a.details?.dca_order_number ?? 0) - (b.details?.dca_order_number ?? 0),
+  )
+
   return (
-    <Card className="p-3 bg-input border-border">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-foreground font-semibold text-sm">{trade.symbol}</span>
-          <Badge variant={isOpen ? 'secondary' : trade.status === 'win' ? 'success' : 'destructive'} className="text-xs">
-            {trade.status.toUpperCase()}
-          </Badge>
-        </div>
-        {trade.exchange && (
-          <span className="text-muted-foreground text-xs">{trade.exchange.toUpperCase()}</span>
-        )}
-      </div>
-      <div className="grid grid-cols-2 gap-1.5 text-xs">
-        {[
-          { l: 'Entry', v: d.entry_price ? `$${parseFloat(String(d.entry_price)).toFixed(4)}` : '—' },
-          { l: 'TP', v: d.take_profit_price ? `$${parseFloat(String(d.take_profit_price)).toFixed(4)}` : '—' },
-          { l: 'SL', v: d.stop_loss_price ? `$${parseFloat(String(d.stop_loss_price)).toFixed(4)}` : '—' },
-          { l: 'Budget', v: d.margin ? `$${parseFloat(String(d.margin)).toFixed(2)}` : '—' },
-          { l: 'Leverage', v: d.leverage ? `${d.leverage}×` : '—' },
-        ]
-          .filter(({ v }) => v !== '—')
-          .map(({ l, v }) => (
-            <div key={l}>
-              <div className="text-muted-foreground">{l}</div>
-              <div className="text-foreground font-semibold">{v}</div>
+    <Card className="bg-input border-border overflow-hidden">
+      {/* Header row */}
+      <button
+        className="w-full p-3 text-left"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="text-foreground font-semibold text-sm">
+                {leadTrade.symbol.replace('/USDT', '')}/USDT
+              </span>
+              <Badge
+                variant={isOpen ? 'secondary' : isWin ? 'success' : 'destructive'}
+                className="text-[10px] px-1.5"
+              >
+                {isOpen ? 'OPEN' : leadTrade.status.toUpperCase()}
+              </Badge>
             </div>
-          ))}
-      </div>
+            <div className="text-muted-foreground text-[11px]">
+              {timeAgo(leadTrade.created_at)}
+              {leadTrade.exchange && <span className="ml-1.5 uppercase">{leadTrade.exchange}</span>}
+            </div>
+          </div>
+          <div className="text-right shrink-0">
+            {isWin && pnlUsdt != null && (
+              <div className={cn('text-sm font-bold', pnlUsdt >= 0 ? 'text-green-400' : 'text-destructive')}>
+                {pnlUsdt >= 0 ? '+' : ''}${pnlUsdt.toFixed(4)}
+              </div>
+            )}
+            {isWin && pnlPct != null && (
+              <div className={cn('text-[11px]', pnlPct >= 0 ? 'text-green-400/70' : 'text-destructive/70')}>
+                {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%
+              </div>
+            )}
+            {isOpen && d.avg_entry_price && (
+              <div className="text-[11px] text-[#a78bfa]">
+                Avg {fmtPrice(d.avg_entry_price)}
+              </div>
+            )}
+            {isOpen && (d.take_profit_price || d.tp_price) && (
+              <div className="text-[11px] text-muted-foreground">
+                TP {fmtPrice(d.take_profit_price || d.tp_price)}
+              </div>
+            )}
+            <div className="mt-1 text-muted-foreground/50">
+              {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            </div>
+          </div>
+        </div>
+
+        {/* Summary: avg entry → exit */}
+        {(d.avg_entry_price || d.entry_price) && (
+          <div className="mt-1.5 text-[11px] text-muted-foreground">
+            {d.avg_entry_price && <span>Avg {fmtPrice(d.avg_entry_price)}</span>}
+            {d.exit_price && <span className="mx-1">→</span>}
+            {d.exit_price && <span className="text-green-400">{fmtPrice(d.exit_price)}</span>}
+          </div>
+        )}
+      </button>
+
+      {/* Expanded legs */}
+      {expanded && (
+        <div className="border-t border-border divide-y divide-border/50">
+          {sortedLegs.map((leg) => {
+            const ld = leg.details ?? {}
+            const isLead = ld.dca_order_number === 1
+            const isPending = leg.status === 'pending'
+            const isFilled = leg.status === 'open' || leg.status === 'win'
+            return (
+              <div key={leg.id} className="px-3 py-2 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <span className={cn(
+                    'text-[10px] font-mono px-1.5 py-0.5 rounded',
+                    isLead ? 'bg-[#6c47ff]/20 text-[#a78bfa]' : 'bg-input text-muted-foreground',
+                  )}>
+                    #{ld.dca_order_number ?? '?'}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {isLead ? 'Base' : 'Safety'}
+                  </span>
+                  <span className="text-foreground font-medium">
+                    {fmtPrice(ld.filled_price || ld.entry_price)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-right">
+                  {ld.contracts && (
+                    <span className="text-muted-foreground">{parseFloat(ld.contracts).toFixed(4)}</span>
+                  )}
+                  <span className={cn(
+                    'text-[10px] px-1 py-0.5 rounded',
+                    isPending ? 'bg-yellow-400/10 text-yellow-400' :
+                    isFilled ? 'bg-green-500/10 text-green-400' :
+                    'bg-muted/20 text-muted-foreground',
+                  )}>
+                    {isPending ? 'Pending' : isFilled ? 'Filled' : leg.status}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+          {/* TP order row (if lead trade has tp_order_id) */}
+          {leadTrade.details?.tp_order_id && (
+            <div className="px-3 py-2 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-green-500/10 text-green-400">TP</span>
+                <span className="text-muted-foreground">Take Profit</span>
+                <span className="text-foreground font-medium">
+                  {fmtPrice(d.exit_price || d.take_profit_price || d.tp_price)}
+                </span>
+              </div>
+              <span className={cn(
+                'text-[10px] px-1 py-0.5 rounded',
+                isWin ? 'bg-green-500/10 text-green-400' : 'bg-yellow-400/10 text-yellow-400',
+              )}>
+                {isWin ? 'Filled' : 'Open'}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
     </Card>
   )
 }
@@ -692,25 +828,48 @@ export default function TradingStrategy() {
             exchanges={exchanges}
             subscription={activeSub}
             workers={workers}
+            trades={strategyTrades}
           />
         </div>
 
-        {/* Trade history */}
-        {strategyTrades.length > 0 && (
-          <div>
-            <h2 className="text-foreground font-semibold text-sm mb-3">
-              Trades
-              <span className="text-muted-foreground font-normal ml-1.5 text-xs">
-                ({strategyTrades.filter((t) => t.status === 'open').length} open)
-              </span>
-            </h2>
-            <div className="flex flex-col gap-2.5">
-              {strategyTrades.map((t) => (
-                <TradeItem key={t.id} trade={t} />
-              ))}
+        {/* Position history */}
+        {strategyTrades.length > 0 && (() => {
+          // Group all trades by cycle_id from details; fallback: each lead trade as its own group
+          const groups = new Map<string, CycleGroup>()
+          for (const t of strategyTrades) {
+            const cycleId = t.details?.cycle_id ?? `fallback-${t.id}`
+            if (!groups.has(cycleId)) {
+              groups.set(cycleId, { cycleId, leadTrade: t, legs: [t] })
+            } else {
+              const g = groups.get(cycleId)!
+              g.legs.push(t)
+              // Lead trade is dca_order_number === 1 or lowest number
+              if ((t.details?.dca_order_number ?? 999) < (g.leadTrade.details?.dca_order_number ?? 999)) {
+                g.leadTrade = t
+              }
+            }
+          }
+          const sortedGroups = [...groups.values()].sort(
+            (a, b) => new Date(b.leadTrade.created_at ?? 0).getTime() - new Date(a.leadTrade.created_at ?? 0).getTime(),
+          )
+          const openCount = sortedGroups.filter((g) => g.leadTrade.status === 'open').length
+          return (
+            <div>
+              <h2 className="text-foreground font-semibold text-sm mb-3">
+                Positions
+                <span className="text-muted-foreground font-normal ml-1.5 text-xs">
+                  {openCount > 0 && `${openCount} open · `}
+                  {sortedGroups.length} total
+                </span>
+              </h2>
+              <div className="flex flex-col gap-2.5">
+                {sortedGroups.map((g) => (
+                  <PositionCard key={g.cycleId} group={g} />
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
       </div>
     </div>
   )
