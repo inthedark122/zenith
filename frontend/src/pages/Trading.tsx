@@ -339,13 +339,13 @@ function StrategyCard({
           </Label>
           <Input
             type="number"
-            placeholder={availableBalance != null ? `1 – ${availableBalance.toFixed(2)}` : 'e.g. 100'}
-            min="1"
+            placeholder={availableBalance != null ? `0.1 – ${availableBalance.toFixed(2)}` : 'e.g. 100'}
+            min="0.1"
             max={maxMargin > 0 ? maxMargin : undefined}
             step="any"
             {...register('margin', {
               required: 'Enter a valid margin',
-              min: { value: 1, message: 'Minimum margin is $1' },
+              min: { value: 0.1, message: 'Minimum margin is $0.10' },
               ...(maxMargin > 0 && {
                 max: {
                   value: maxMargin,
