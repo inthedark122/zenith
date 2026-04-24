@@ -1,40 +1,50 @@
 """
-DCA — strategy worker implementation.
+DCA — strategy worker implementation (proactive limit orders).
 
 Strategy rules
 --------------
 - Symbols    : admin-configured list
-- Direction  : LONG only (spot / 1×)
+- Direction  : LONG only (spot / swap)
 - Cycle      : one DCA cycle per symbol at a time
-    * Order #1 — opened immediately when no active cycle exists
-    * Order #N — opened when price drops ``step_percent``% from last entry
-    * Maximum ``max_orders`` orders per cycle
-    * Take profit when price ≥ weighted average entry × (1 + take_profit_percent / 100)
-    * When TP is hit all open orders in the cycle are closed as WIN
-    * After the cycle closes, a new one starts on the next poll tick
+
+New cycle (proactive):
+  1. Base order  — market buy immediately (fills at current price)
+  2. Safety orders — ALL placed upfront as limit buys below base fill price
+  3. TP order    — limit sell placed after base fills; updated each time a
+                   safety order fills
+  4. WIN         — when TP limit sell fills; cancel remaining PENDING safety orders
+  5. Next cycle  — starts on next tick after WIN
+
+Each tick (active cycle):
+  a. If TP order filled → cancel all PENDING → mark all OPEN+PENDING as WIN
+  b. If any PENDING safety order filled → recalculate avg entry → cancel old TP
+     → place new TP for total_contracts at new avg price
 
 Settings (from Strategy.settings JSON)
 ---------------------------------------
-    amount_multiplier   — safety order amount = prev_amount × multiplier   (default 2.0)
-    step_percent        — % price drop from last entry to trigger next order (default 0.5)
-    max_orders          — max orders per cycle incl. initial order           (default 5)
-    take_profit_percent — TP % above weighted avg entry                      (default 1.0)
+    amount_multiplier   — each safety order is multiplier × prev amount   (default 2.0)
+    step_percent        — price level steps (each safety is step_percent% lower)  (default 0.5)
+    max_orders          — max orders per cycle incl. base order            (default 5)
+    take_profit_percent — TP % above weighted avg entry                    (default 1.0)
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import date
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.exchange.order_executor import (
     build_authenticated_exchange,
-    close_long_position,
+    cancel_limit_order,
+    fetch_order_status,
     get_open_position_size,
     open_long_position,
+    place_limit_buy,
+    place_limit_sell_close,
 )
 from app.models.trade import StrategyTrade, TradeStatus
 from app.models.worker import StrategyWorker
@@ -42,6 +52,7 @@ from app.strategies.dca.strategy import (
     calculate_avg_entry,
     calculate_base_order,
     calculate_next_amount,
+    calculate_safety_prices,
     calculate_take_profit,
 )
 
@@ -57,21 +68,19 @@ def run_for_worker(
     """
     Evaluate the DCA strategy for a single running worker.
 
-    Steps per symbol
-    ----------------
-    1. Load all OPEN orders for this worker + symbol (current cycle).
-    2. If no open orders → start a new cycle (order #1 at market).
-    3. If open orders exist:
-       a. Recalculate avg entry and TP.
-       b. If current price ≥ TP → close all orders as WIN (close exchange position).
-       c. Else if price dropped ≥ step_percent from last entry
-          and order_count < max_orders → open next safety order.
+    New cycle (no OPEN/PENDING trades for symbol):
+        1. Market buy base order
+        2. Place N-1 safety limit buy orders below fill price
+        3. Place TP limit sell for base contracts
+
+    Active cycle (OPEN or PENDING trades exist):
+        a. Check if TP order filled → WIN → cancel remaining safety orders
+        b. Check each PENDING safety order for fills → update TP when filled
 
     Exchange integration
     --------------------
     worker.user_exchange_id must be set. If it is None, trades are skipped.
-    Real market orders are placed via CCXT. If an order fails (e.g. min size),
-    the trade is skipped for this cycle but the worker loop continues.
+    Real market/limit orders are placed via CCXT.
     """
     if worker.user_exchange_id is None or worker.user_exchange is None:
         log.warning(
@@ -91,7 +100,6 @@ def run_for_worker(
     # Respect the user's token selection (empty list = trade all strategy symbols)
     allowed_symbols: set = set(worker.selected_symbols or [])
 
-    # Build authenticated exchange client once per worker cycle
     try:
         exchange_client = build_authenticated_exchange(worker.user_exchange)
     except Exception as exc:
@@ -105,200 +113,335 @@ def run_for_worker(
         sym_market_type: str = sym_cfg.get("market_type", "spot") if isinstance(sym_cfg, dict) else "spot"
         sym_leverage: int = int(sym_cfg.get("leverage", 1)) if isinstance(sym_cfg, dict) else 1
 
-        current_price = current_prices.get(symbol)
-        if current_price is None:
-            log.warning("Worker #%d: no price for %s — skipping", worker.id, symbol)
-            continue
-
-        open_orders = (
+        # Load all active trades (OPEN = filled base/safety; PENDING = unfilled limit safety)
+        active_trades = (
             db.query(StrategyTrade)
             .filter(
                 StrategyTrade.worker_id == worker.id,
                 StrategyTrade.symbol == symbol,
-                StrategyTrade.status == TradeStatus.OPEN,
+                StrategyTrade.status.in_([TradeStatus.OPEN, TradeStatus.PENDING]),
             )
             .order_by(StrategyTrade.created_at.asc())
             .all()
         )
-        order_count = len(open_orders)
 
-        if order_count == 0:
+        open_trades = [t for t in active_trades if t.status == TradeStatus.OPEN]
+        pending_trades = [t for t in active_trades if t.status == TradeStatus.PENDING]
+
+        if not active_trades:
             # ── Start new DCA cycle ────────────────────────────────────────
-            # Per-symbol budget from symbol_margins; skip if not configured.
-            symbol_budget = float((worker.symbol_margins or {}).get(symbol, 0))
-            if symbol_budget <= 0:
-                log.warning(
-                    "Worker #%d: no budget set for %s in symbol_margins — skipping",
-                    worker.id, symbol,
-                )
-                continue
-            initial_amount = calculate_base_order(
-                symbol_budget, amount_multiplier, max_orders
-            )
-            tp_price = calculate_take_profit(current_price, take_profit_percent)
-
-            # Place real exchange order
-            result = open_long_position(
-                exchange_client, symbol, initial_amount, sym_leverage, sym_market_type
-            )
-            if result["skipped"]:
-                log.warning(
-                    "Worker #%d: DCA order #1 for %s skipped (exchange error: %s)",
-                    worker.id, symbol, result.get("error"),
-                )
-                continue
-
-            filled_price = result["filled_price"] or current_price
-            contracts = result["contracts"]
-
-            trade = StrategyTrade(
-                user_id=worker.user_id,
-                worker_id=worker.id,
-                strategy_id=strategy.id,
-                symbol=symbol,
-                exchange=worker.exchange_id,
-                status=TradeStatus.OPEN,
-                trade_date=date.today(),
-                details={
-                    "dca_order_number": 1,
-                    "entry_price": str(filled_price),
-                    "amount": str(initial_amount),
-                    "contracts": str(contracts),
-                    "avg_entry_price": str(filled_price),
-                    "take_profit_price": str(tp_price),
-                    "margin": str(initial_amount),
-                    "leverage": sym_leverage,
-                    "market_type": sym_market_type,
-                    "order_id": result["order_id"],
-                },
-            )
-            db.add(trade)
-            log.info(
-                "Worker #%d: DCA cycle started for %s @ %.4f "
-                "(order #1, $%.2f, TP=%.4f, order_id=%s)",
-                worker.id, symbol, filled_price, initial_amount, tp_price, result["order_id"],
+            _start_new_cycle(
+                worker, exchange_client, db,
+                symbol, sym_market_type, sym_leverage,
+                amount_multiplier, step_percent, max_orders, take_profit_percent,
             )
             continue
 
-        # ── Active cycle: verify exchange position still exists ───────────
-        # If DB shows open orders but exchange has no long position, the
-        # position was closed externally. Mark stale DB records as STOPPED
-        # and let the next tick start a fresh cycle.
-        market_type_check = (
-            open_orders[0].details.get("market_type", "spot")
-            if open_orders[0].details else "spot"
-        )
-        if market_type_check != "spot":
+        # ── Active cycle: verify exchange position still exists (swap only) ─
+        if open_trades and sym_market_type != "spot":
             live_contracts = get_open_position_size(exchange_client, symbol)
             if live_contracts is None:
                 log.warning(
-                    "Worker #%d: DB has %d open order(s) for %s but no exchange "
-                    "position found — marking as STOPPED and restarting cycle",
-                    worker.id, order_count, symbol,
+                    "Worker #%d: %d open/pending trade(s) for %s but no exchange "
+                    "position found — marking as STOPPED, restarting next tick",
+                    worker.id, len(active_trades), symbol,
                 )
-                for t in open_orders:
+                for t in active_trades:
                     t.status = TradeStatus.STOPPED
                 db.flush()
                 continue
 
-        # ── Active cycle: recalculate avg entry and TP ─────────────────────
+        # Lead trade is the oldest OPEN record (holds tp_order_id)
+        lead_trade = open_trades[0] if open_trades else None
+        if lead_trade is None:
+            log.warning(
+                "Worker #%d: %s has PENDING safety orders but no OPEN lead trade — skipping",
+                worker.id, symbol,
+            )
+            continue
+
+        # ── Step 1: Check TP order fill ──────────────────────────────────────
+        tp_order_id: Optional[str] = lead_trade.details.get("tp_order_id")
+        if tp_order_id:
+            tp_status = fetch_order_status(exchange_client, symbol, tp_order_id)
+            if tp_status == "filled":
+                # TP hit — cancel remaining safety orders, mark everything WIN
+                for t in pending_trades:
+                    oid = t.details.get("order_id")
+                    if oid:
+                        cancel_limit_order(exchange_client, symbol, oid)
+                    t.status = TradeStatus.WIN
+                for t in open_trades:
+                    t.status = TradeStatus.WIN
+                log.info(
+                    "Worker #%d: DCA TP filled for %s — "
+                    "%d OPEN + %d PENDING → WIN (tp_order_id=%s)",
+                    worker.id, symbol, len(open_trades), len(pending_trades), tp_order_id,
+                )
+                continue
+
+        # ── Step 2: Check PENDING safety order fills ──────────────────────────
+        newly_filled: List[StrategyTrade] = []
+        for t in pending_trades:
+            oid = t.details.get("order_id")
+            if not oid:
+                continue
+
+            order_status = fetch_order_status(exchange_client, symbol, oid)
+            if order_status == "filled":
+                filled_price, actual_contracts = _fetch_fill_details(
+                    exchange_client, symbol, oid,
+                    fallback_price=float(t.details.get("entry_price") or 0),
+                    fallback_contracts=float(t.details.get("contracts") or 0),
+                )
+                t.status = TradeStatus.OPEN
+                t.details = {
+                    **t.details,
+                    "filled_price": str(filled_price),
+                    "contracts": str(actual_contracts),
+                }
+                flag_modified(t, "details")
+                newly_filled.append(t)
+                log.info(
+                    "Worker #%d: safety order #%d filled for %s @ %.6f (contracts=%.6f)",
+                    worker.id, t.details.get("dca_order_number"), symbol,
+                    filled_price, actual_contracts,
+                )
+            elif order_status == "cancelled":
+                log.warning(
+                    "Worker #%d: safety order #%d for %s cancelled externally — marking CLOSED",
+                    worker.id, t.details.get("dca_order_number"), symbol,
+                )
+                t.status = TradeStatus.CLOSED
+
+        if not newly_filled:
+            continue
+
+        # ── Step 3: Update TP with new total after safety fills ──────────────
+        all_open_now = [t for t in active_trades if t.status == TradeStatus.OPEN]
+
         entries = [
-            (float(t.details["entry_price"]), float(t.details["amount"]))
-            for t in open_orders
+            (
+                float(t.details.get("filled_price") or t.details.get("entry_price") or 0),
+                float(t.details.get("contracts") or 0),
+            )
+            for t in all_open_now
         ]
         avg_entry = calculate_avg_entry(entries)
-        tp_price = calculate_take_profit(avg_entry, take_profit_percent)
+        new_tp_price = calculate_take_profit(avg_entry, take_profit_percent)
+        total_contracts = sum(float(t.details.get("contracts") or 0) for t in all_open_now)
 
-        # ── Check take profit ──────────────────────────────────────────────
-        if current_price >= tp_price:
-            # Close full position on exchange
-            total_contracts = sum(
-                float(t.details.get("contracts") or t.details.get("amount") or 0)
-                for t in open_orders
-            )
-            if total_contracts > 0:
-                close_result = close_long_position(
-                    exchange_client, symbol, total_contracts, sym_market_type
-                )
-                if close_result["error"]:
-                    log.warning(
-                        "Worker #%d: failed to close %s on exchange: %s",
-                        worker.id, symbol, close_result["error"],
-                    )
+        # Cancel old TP
+        if tp_order_id:
+            cancel_limit_order(exchange_client, symbol, tp_order_id)
 
-            for t in open_orders:
-                t.status = TradeStatus.WIN
-            log.info(
-                "Worker #%d: DCA TP hit for %s @ %.4f "
-                "(avg_entry=%.4f, TP=%.4f, %d orders → WIN)",
-                worker.id, symbol, current_price, avg_entry, tp_price, order_count,
-            )
-            continue
-
-        # ── Check safety order trigger ────────────────────────────────────
-        if order_count >= max_orders:
-            continue
-
-        last_entry_price = float(open_orders[-1].details["entry_price"])
-        drop_pct = (last_entry_price - current_price) / last_entry_price * 100
-
-        if drop_pct < step_percent:
-            continue
-
-        # Open next safety order
-        prev_amount = float(open_orders[-1].details["amount"])
-        next_amount = calculate_next_amount(prev_amount, amount_multiplier)
-
-        result = open_long_position(
-            exchange_client, symbol, next_amount, sym_leverage, sym_market_type
+        # Place updated TP
+        tp_result = place_limit_sell_close(
+            exchange_client, symbol, total_contracts, new_tp_price, sym_market_type
         )
-        if result["skipped"]:
+        new_tp_order_id: Optional[str] = None
+        if tp_result["error"]:
             log.warning(
-                "Worker #%d: DCA safety order #%d for %s skipped: %s",
-                worker.id, order_count + 1, symbol, result.get("error"),
+                "Worker #%d: failed to update TP for %s: %s",
+                worker.id, symbol, tp_result["error"],
+            )
+        else:
+            new_tp_order_id = tp_result["order_id"]
+
+        # Update lead trade with new TP details
+        lead_trade.details = {
+            **lead_trade.details,
+            "tp_order_id": new_tp_order_id,
+            "tp_price": str(new_tp_price),
+            "tp_contracts": str(total_contracts),
+            "avg_entry_price": str(avg_entry),
+            "take_profit_price": str(new_tp_price),
+        }
+        flag_modified(lead_trade, "details")
+
+        # Keep avg/tp in sync on non-lead OPEN trades for UI display
+        for t in all_open_now:
+            if t.id != lead_trade.id:
+                t.details = {
+                    **t.details,
+                    "avg_entry_price": str(avg_entry),
+                    "take_profit_price": str(new_tp_price),
+                }
+                flag_modified(t, "details")
+
+        log.info(
+            "Worker #%d: %s TP updated after %d safety fill(s) — "
+            "avg=%.6f tp=%.6f contracts=%.6f (tp_order_id=%s)",
+            worker.id, symbol, len(newly_filled),
+            avg_entry, new_tp_price, total_contracts, new_tp_order_id,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
+
+def _start_new_cycle(
+    worker: StrategyWorker,
+    exchange_client,
+    db: Session,
+    symbol: str,
+    market_type: str,
+    leverage: int,
+    amount_multiplier: float,
+    step_percent: float,
+    max_orders: int,
+    take_profit_percent: float,
+) -> None:
+    """Start a fresh DCA cycle: market base + N-1 safety limit orders + TP."""
+    symbol_budget = float((worker.symbol_margins or {}).get(symbol, 0))
+    if symbol_budget <= 0:
+        log.warning(
+            "Worker #%d: no budget set for %s in symbol_margins — skipping",
+            worker.id, symbol,
+        )
+        return
+
+    strategy = worker.strategy
+
+    # ── 1. Market buy base order ──────────────────────────────────────────
+    initial_amount = calculate_base_order(symbol_budget, amount_multiplier, max_orders)
+    result = open_long_position(exchange_client, symbol, initial_amount, leverage, market_type)
+    if result["skipped"]:
+        log.warning(
+            "Worker #%d: DCA base order for %s skipped (error: %s)",
+            worker.id, symbol, result.get("error"),
+        )
+        return
+
+    base_fill_price = float(result["filled_price"] or 0)
+    base_contracts = float(result["contracts"] or 0)
+
+    if base_fill_price <= 0 or base_contracts <= 0:
+        log.warning(
+            "Worker #%d: DCA base order for %s returned invalid fill — price=%.6f contracts=%.6f",
+            worker.id, symbol, base_fill_price, base_contracts,
+        )
+        return
+
+    log.info(
+        "Worker #%d: DCA base order for %s filled @ %.6f (contracts=%.6f order_id=%s)",
+        worker.id, symbol, base_fill_price, base_contracts, result["order_id"],
+    )
+
+    # ── 2. Place safety limit buy orders ──────────────────────────────────
+    safety_prices = calculate_safety_prices(base_fill_price, step_percent, max_orders)
+    prev_amount = initial_amount
+    placed_safety_count = 0
+
+    for i, safety_price in enumerate(safety_prices):
+        safety_amount = calculate_next_amount(prev_amount, amount_multiplier)
+        safety_result = place_limit_buy(
+            exchange_client, symbol, safety_amount, leverage, market_type, safety_price
+        )
+        prev_amount = safety_amount  # advance regardless to keep correct progression
+
+        if safety_result["error"] or safety_result["skipped"]:
+            log.warning(
+                "Worker #%d: failed to place safety limit order #%d for %s @ %.6f: %s",
+                worker.id, i + 2, symbol, safety_price, safety_result.get("error"),
             )
             continue
 
-        filled_price = result["filled_price"] or current_price
-        contracts = result["contracts"]
-
-        new_avg_entry = calculate_avg_entry(entries + [(filled_price, next_amount)])
-        new_tp_price = calculate_take_profit(new_avg_entry, take_profit_percent)
-
-        # Update TP on all existing open orders so the UI stays consistent
-        for t in open_orders:
-            t.details = {
-                **t.details,
-                "avg_entry_price": str(new_avg_entry),
-                "take_profit_price": str(new_tp_price),
-            }
-            flag_modified(t, "details")
-
-        trade = StrategyTrade(
+        safety_trade = StrategyTrade(
             user_id=worker.user_id,
             worker_id=worker.id,
             strategy_id=strategy.id,
             symbol=symbol,
             exchange=worker.exchange_id,
-            status=TradeStatus.OPEN,
+            status=TradeStatus.PENDING,
             trade_date=date.today(),
             details={
-                "dca_order_number": order_count + 1,
-                "entry_price": str(filled_price),
-                "amount": str(next_amount),
-                "contracts": str(contracts),
-                "avg_entry_price": str(new_avg_entry),
-                "take_profit_price": str(new_tp_price),
-                "margin": str(next_amount),
-                "leverage": sym_leverage,
-                "market_type": sym_market_type,
-                "order_id": result["order_id"],
+                "dca_order_number": i + 2,
+                "entry_price": str(safety_price),
+                "amount": str(safety_amount),
+                "contracts": str(safety_result["contracts"]),
+                "order_id": safety_result["order_id"],
+                "market_type": market_type,
+                "leverage": leverage,
             },
         )
-        db.add(trade)
+        db.add(safety_trade)
+        placed_safety_count += 1
         log.info(
-            "Worker #%d: DCA safety order #%d for %s @ %.4f "
-            "(drop=%.2f%%, $%.2f, avg=%.4f, TP=%.4f, order_id=%s)",
-            worker.id, order_count + 1, symbol, filled_price,
-            drop_pct, next_amount, new_avg_entry, new_tp_price, result["order_id"],
+            "Worker #%d: safety limit order #%d for %s @ %.6f placed (order_id=%s)",
+            worker.id, i + 2, symbol, safety_price, safety_result["order_id"],
         )
+
+    # ── 3. Place TP limit sell for base order contracts ───────────────────
+    tp_price = calculate_take_profit(base_fill_price, take_profit_percent)
+    tp_result = place_limit_sell_close(
+        exchange_client, symbol, base_contracts, tp_price, market_type
+    )
+    tp_order_id: Optional[str] = None
+    if tp_result["error"]:
+        log.warning(
+            "Worker #%d: failed to place initial TP for %s: %s",
+            worker.id, symbol, tp_result["error"],
+        )
+    else:
+        tp_order_id = tp_result["order_id"]
+
+    # ── 4. Create lead trade DB record ────────────────────────────────────
+    lead_trade = StrategyTrade(
+        user_id=worker.user_id,
+        worker_id=worker.id,
+        strategy_id=strategy.id,
+        symbol=symbol,
+        exchange=worker.exchange_id,
+        status=TradeStatus.OPEN,
+        trade_date=date.today(),
+        details={
+            "dca_order_number": 1,
+            "entry_price": str(base_fill_price),
+            "filled_price": str(base_fill_price),
+            "amount": str(initial_amount),
+            "contracts": str(base_contracts),
+            "order_id": result["order_id"],
+            "tp_order_id": tp_order_id,
+            "tp_price": str(tp_price),
+            "tp_contracts": str(base_contracts),
+            "avg_entry_price": str(base_fill_price),
+            "take_profit_price": str(tp_price),
+            "market_type": market_type,
+            "leverage": leverage,
+        },
+    )
+    db.add(lead_trade)
+
+    log.info(
+        "Worker #%d: DCA cycle started for %s @ %.6f "
+        "($%.2f base, %d/%d safety orders placed, TP=%.6f tp_order_id=%s)",
+        worker.id, symbol, base_fill_price, initial_amount,
+        placed_safety_count, max_orders - 1, tp_price, tp_order_id,
+    )
+
+
+def _fetch_fill_details(
+    exchange_client,
+    symbol: str,
+    order_id: str,
+    fallback_price: float,
+    fallback_contracts: float,
+) -> tuple[float, float]:
+    """Return (filled_price, contracts) from exchange, falling back to DB values."""
+    try:
+        order_info = exchange_client.fetch_order(order_id, symbol)
+        filled_price = float(
+            order_info.get("average") or order_info.get("price") or fallback_price
+        )
+        actual_contracts = float(
+            order_info.get("filled") or order_info.get("amount") or fallback_contracts
+        )
+        return filled_price, actual_contracts
+    except Exception as exc:
+        log.warning(
+            "Could not fetch fill details for order %s [%s]: %s",
+            order_id, symbol, exc,
+        )
+        return fallback_price, fallback_contracts

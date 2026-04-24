@@ -318,15 +318,19 @@ def stop_worker(
     if worker.status != WorkerStatus.RUNNING:
         raise HTTPException(status_code=400, detail="Worker is not running")
 
-    # Force-close all open trades under this worker
-    open_trades = (
+    # Force-close all OPEN and PENDING trades under this worker.
+    # liquidate_symbol() already cancels all open exchange orders (including
+    # PENDING limit safety orders) — we just need to mark DB rows CLOSED too.
+    active_trades = (
         db.query(StrategyTrade)
         .filter(
             StrategyTrade.worker_id == worker.id,
-            StrategyTrade.status == TradeStatus.OPEN,
+            StrategyTrade.status.in_([TradeStatus.OPEN, TradeStatus.PENDING]),
         )
         .all()
     )
+    open_trades = [t for t in active_trades if t.status == TradeStatus.OPEN]
+
     # Attempt to cancel open orders and close open positions on the exchange.
     # Group by symbol so each position is liquidated exactly once (DCA may
     # have several DB trades for the same exchange position).
@@ -334,7 +338,8 @@ def stop_worker(
         try:
             exchange_client = build_authenticated_exchange(worker.user_exchange)
 
-            # Build {symbol: {market_type, spot_contracts}} from open DB trades
+            # Build {symbol: {market_type, spot_contracts}} from OPEN DB trades only
+            # (PENDING = not yet filled, so no real spot holdings to close)
             symbol_info: dict[str, dict] = {}
             for trade in open_trades:
                 details = trade.details or {}
@@ -364,7 +369,7 @@ def stop_worker(
         except Exception as exc:
             log.error("stop_worker #%d: exchange cleanup failed: %s", worker.id, exc)
 
-    for trade in open_trades:
+    for trade in active_trades:
         trade.status = TradeStatus.CLOSED
 
     worker.status = WorkerStatus.STOPPED
@@ -372,7 +377,7 @@ def stop_worker(
     db.commit()
     db.refresh(worker)
 
-    closed_count = len(open_trades)
+    closed_count = len(active_trades)
     return WorkerStopResponse(
         **WorkerResponse.model_validate(worker).model_dump(),
         closed_trades_count=closed_count,
@@ -580,17 +585,21 @@ def stop_tokens(
     if not payload.symbols:
         raise HTTPException(status_code=400, detail="Specify at least one token to stop.")
 
-    # Liquidate each symbol on the exchange
-    open_trades = (
+    # Liquidate each symbol on the exchange.
+    # Query both OPEN and PENDING trades — liquidate_symbol() cancels all open
+    # exchange orders (including PENDING limit safety buys) automatically.
+    active_trades = (
         db.query(StrategyTrade)
         .filter(
             StrategyTrade.worker_id == worker.id,
-            StrategyTrade.status == TradeStatus.OPEN,
+            StrategyTrade.status.in_([TradeStatus.OPEN, TradeStatus.PENDING]),
             StrategyTrade.symbol.in_(payload.symbols),
         )
         .all()
     )
+    open_trades = [t for t in active_trades if t.status == TradeStatus.OPEN]
 
+    # Build symbol_info from OPEN trades only (PENDING = unfilled, no real holdings)
     symbol_info: dict[str, dict] = {}
     for trade in open_trades:
         details = trade.details or {}
@@ -609,7 +618,7 @@ def stop_tokens(
         except Exception as exc:
             log.error("stop_tokens worker #%d: exchange cleanup failed: %s", worker.id, exc)
 
-    for trade in open_trades:
+    for trade in active_trades:
         trade.status = TradeStatus.CLOSED
 
     # Remove stopped symbols from worker

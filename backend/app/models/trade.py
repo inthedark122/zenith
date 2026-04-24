@@ -11,6 +11,7 @@ class TradeStatus(str, Enum):
     OPEN = "open"
     WIN = "win"
     LOSS = "loss"
+    PENDING = "pending" # limit order placed on exchange, not yet filled
     CLOSED = "closed"   # force-closed when the parent worker is stopped
     STOPPED = "stopped" # stale — exchange position no longer exists
 

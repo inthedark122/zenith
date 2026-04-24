@@ -314,6 +314,177 @@ def get_open_position_size(
         return None
 
 
+def place_limit_buy(
+    exchange: ccxt.Exchange,
+    symbol: str,
+    usdt_margin: float,
+    leverage: int,
+    market_type: str,  # "spot" | "swap"
+    limit_price: float,
+) -> Dict[str, Any]:
+    """
+    Place a limit buy order at *limit_price*.
+
+    Returns a dict with:
+        order_id   — exchange order ID (str)
+        contracts  — contracts / base amount ordered
+        skipped    — True if order was not placed (below min size or error)
+        error      — error message if order failed (None if success)
+    """
+    result: Dict[str, Any] = {
+        "order_id": None,
+        "contracts": None,
+        "skipped": False,
+        "error": None,
+    }
+
+    try:
+        if market_type == "swap":
+            adapter = get_adapter(exchange.id)
+            is_hedge = _get_hedge_mode(exchange)
+
+            contracts, skipped = _calc_swap_contracts(
+                exchange, symbol, usdt_margin, leverage, limit_price
+            )
+            if skipped:
+                result["skipped"] = True
+                result["contracts"] = contracts
+                return result
+
+            order = exchange.create_order(
+                symbol, "limit", "buy", contracts, limit_price,
+                params=adapter.open_swap_params(is_hedge),
+            )
+        else:
+            # Spot: buy base amount at limit price, funded by usdt_margin
+            amount = usdt_margin / limit_price
+            order = exchange.create_order(
+                symbol, "limit", "buy", amount, limit_price,
+            )
+            contracts = amount
+
+        result["order_id"] = str(order.get("id", ""))
+        result["contracts"] = float(order.get("amount") or contracts)
+
+    except Exception as exc:
+        if market_type == "swap":
+            adapter = get_adapter(exchange.id)
+            if adapter.is_pos_mode_error(exc):
+                _clear_hedge_mode(exchange)
+        log.exception("place_limit_buy failed for %s @ %.8f: %s", symbol, limit_price, exc)
+        result["error"] = str(exc)
+        result["skipped"] = True
+
+    return result
+
+
+def place_limit_sell_close(
+    exchange: ccxt.Exchange,
+    symbol: str,
+    contracts: float,
+    limit_price: float,
+    market_type: str,  # "spot" | "swap"
+) -> Dict[str, Any]:
+    """
+    Place a limit sell order to close a long position (TP order).
+
+    Returns a dict with:
+        order_id — exchange order ID (str)
+        error    — error message if failed (None if success)
+    """
+    result: Dict[str, Any] = {
+        "order_id": None,
+        "error": None,
+    }
+
+    try:
+        if market_type == "swap":
+            adapter = get_adapter(exchange.id)
+            is_hedge = _get_hedge_mode(exchange)
+            order = exchange.create_order(
+                symbol, "limit", "sell", contracts, limit_price,
+                params=adapter.close_swap_params(is_hedge),
+            )
+        else:
+            order = exchange.create_order(
+                symbol, "limit", "sell", contracts, limit_price,
+            )
+
+        result["order_id"] = str(order.get("id", ""))
+
+    except Exception as exc:
+        if market_type == "swap":
+            adapter = get_adapter(exchange.id)
+            if adapter.is_pos_mode_error(exc):
+                _clear_hedge_mode(exchange)
+        log.exception(
+            "place_limit_sell_close failed for %s %.6f @ %.8f: %s",
+            symbol, contracts, limit_price, exc,
+        )
+        result["error"] = str(exc)
+
+    return result
+
+
+def fetch_order_status(
+    exchange: ccxt.Exchange,
+    symbol: str,
+    order_id: str,
+) -> str:
+    """
+    Fetch the status of an order.
+
+    Returns one of: "filled", "open", "cancelled", "unknown".
+    CCXT normalizes OKX status: live/partially_filled → "open", filled → "closed".
+    """
+    try:
+        order = exchange.fetch_order(order_id, symbol)
+        raw_status = (order.get("status") or "").lower()
+        if raw_status == "closed":
+            return "filled"
+        elif raw_status in ("canceled", "cancelled", "expired"):
+            return "cancelled"
+        elif raw_status == "open":
+            return "open"
+        else:
+            return "unknown"
+    except Exception as exc:
+        log.warning(
+            "fetch_order_status failed for order %s [%s]: %s",
+            order_id, symbol, exc,
+        )
+        return "unknown"
+
+
+def cancel_limit_order(
+    exchange: ccxt.Exchange,
+    symbol: str,
+    order_id: str,
+) -> bool:
+    """
+    Cancel a specific order. Returns True on success, False on failure.
+    Already-filled or already-cancelled orders are treated as success.
+    """
+    try:
+        exchange.cancel_order(order_id, symbol)
+        log.info("cancel_limit_order: cancelled %s for %s", order_id, symbol)
+        return True
+    except Exception as exc:
+        msg = str(exc).lower()
+        # Treat "order already completed/cancelled" as success
+        if any(k in msg for k in ("filled", "completed", "cancelled", "not exist", "not found")):
+            log.info(
+                "cancel_limit_order: order %s [%s] already closed — %s",
+                order_id, symbol, exc,
+            )
+            return True
+        log.warning(
+            "cancel_limit_order failed for order %s [%s]: %s",
+            order_id, symbol, exc,
+        )
+        return False
+
+
 def liquidate_symbol(
     exchange: ccxt.Exchange,
     symbol: str,

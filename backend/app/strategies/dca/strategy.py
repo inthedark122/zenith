@@ -24,11 +24,34 @@ def calculate_avg_entry(entries: List[tuple[float, float]]) -> float:
     """
     Weighted average entry price.
 
-    ``entries`` is a list of (entry_price, amount_usdt) tuples.
+    ``entries`` is a list of (entry_price, contracts) tuples.
+    The weighted average is: total_cost / total_contracts.
     """
-    total_cost = sum(price * amount for price, amount in entries)
-    total_amount = sum(amount for _, amount in entries)
-    return total_cost / total_amount if total_amount > 0 else 0.0
+    total_contracts = sum(contracts for _, contracts in entries)
+    total_cost = sum(price * contracts for price, contracts in entries)
+    return total_cost / total_contracts if total_contracts > 0 else 0.0
+
+
+def calculate_safety_prices(
+    base_price: float,
+    step_percent: float,
+    max_orders: int,
+) -> List[float]:
+    """
+    Return the limit buy prices for safety orders 2…max_orders.
+
+    Each price is step_percent% lower than the previous:
+        price[0] = base_price × (1 - step_percent/100)
+        price[1] = price[0]   × (1 - step_percent/100)
+        ...
+    Returns max_orders - 1 prices (empty if max_orders <= 1).
+    """
+    prices: List[float] = []
+    price = base_price
+    for _ in range(max_orders - 1):
+        price = price * (1.0 - step_percent / 100.0)
+        prices.append(round(price, 8))
+    return prices
 
 
 def calculate_take_profit(avg_entry: float, take_profit_percent: float) -> float:
