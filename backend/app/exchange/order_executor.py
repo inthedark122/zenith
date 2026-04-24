@@ -12,11 +12,15 @@ Swap amount calculation
     contracts           = floor(contracts / min_lot) * min_lot   (round to lot)
     if contracts < min_contracts: skip (log warning, return skipped=True)
 
-OKX one-way isolated-margin params used for swap (isolated draws from account
-balance directly, avoiding the cross-margin pool issue). Do NOT pass posSide
-for one-way accounts — OKX rejects 'net' as an invalid value for isolated mode:
-    open:  {'tdMode': 'isolated'}
-    close: {'tdMode': 'isolated', 'reduceOnly': True}
+Hedge-mode detection
+--------------------
+Per-exchange adapters (`app/exchange/adapters/`) detect the account's position
+mode once on first use and cache the result by API key for the lifetime of the
+process.  When the adapter detects a mode-mismatch error (e.g. OKX 51000), the
+cache entry is invalidated so the next poll cycle re-detects automatically.
+
+    net mode  → no posSide / positionSide needed
+    hedge mode → adapter injects the correct side params (e.g. posSide="long")
 
 Spot markets use quoteOrderQty to spend a fixed USDT amount.
 """
@@ -29,9 +33,41 @@ from typing import Any, Dict, Optional
 
 import ccxt
 
+from app.exchange.adapters import get_adapter
 from app.models.exchange import UserExchange
 
 log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Hedge-mode cache  {api_key: is_hedge_mode}
+# ---------------------------------------------------------------------------
+
+_hedge_cache: Dict[str, bool] = {}
+
+
+def _get_hedge_mode(exchange: ccxt.Exchange) -> bool:
+    """Return cached hedge-mode flag, detecting from exchange on first call."""
+    key = exchange.apiKey
+    if key not in _hedge_cache:
+        adapter = get_adapter(exchange.id)
+        is_hedge = adapter.detect_hedge_mode(exchange)
+        _hedge_cache[key] = is_hedge
+        log.info(
+            "[%s] Position mode detected: %s",
+            exchange.id,
+            "hedge (long/short)" if is_hedge else "net (one-way)",
+        )
+    return _hedge_cache[key]
+
+
+def _clear_hedge_mode(exchange: ccxt.Exchange) -> None:
+    """Invalidate the cached hedge-mode for *exchange* so it is re-detected next cycle."""
+    removed = _hedge_cache.pop(exchange.apiKey, None)
+    if removed is not None:
+        log.warning(
+            "[%s] Hedge-mode cache invalidated — will re-detect on next cycle",
+            exchange.id,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -148,12 +184,15 @@ def open_long_position(
 
     try:
         if market_type == "swap":
+            adapter = get_adapter(exchange.id)
+            is_hedge = _get_hedge_mode(exchange)
+
             # Use isolated margin — draws from account balance directly.
             # Cross margin requires a separate margin pool which may be empty.
             try:
                 exchange.set_leverage(
                     leverage, symbol,
-                    {"mgnMode": "isolated"},
+                    adapter.set_leverage_params(is_hedge),
                 )
             except Exception as exc:
                 log.warning("Could not set leverage for %s: %s", symbol, exc)
@@ -172,7 +211,7 @@ def open_long_position(
 
             order = exchange.create_order(
                 symbol, "market", "buy", contracts, None,
-                params={"tdMode": "isolated"},
+                params=adapter.open_swap_params(is_hedge),
             )
 
         else:  # spot
@@ -188,6 +227,15 @@ def open_long_position(
         result["contracts"] = float(order.get("filled") or order.get("amount") or 0.0)
 
     except Exception as exc:
+        if market_type == "swap":
+            adapter = get_adapter(exchange.id)
+            if adapter.is_pos_mode_error(exc):
+                _clear_hedge_mode(exchange)
+                log.warning(
+                    "[%s] Position mode mismatch on open — cache cleared, "
+                    "will re-detect next cycle",
+                    exchange.id,
+                )
         log.exception("open_long_position failed for %s: %s", symbol, exc)
         result["error"] = str(exc)
         result["skipped"] = True
@@ -217,9 +265,11 @@ def close_long_position(
 
     try:
         if market_type == "swap":
+            adapter = get_adapter(exchange.id)
+            is_hedge = _get_hedge_mode(exchange)
             order = exchange.create_order(
                 symbol, "market", "sell", contracts, None,
-                params={"tdMode": "isolated", "reduceOnly": True},
+                params=adapter.close_swap_params(is_hedge),
             )
         else:
             order = exchange.create_market_sell_order(symbol, contracts)
@@ -228,6 +278,15 @@ def close_long_position(
         result["filled_price"] = float(order.get("average") or order.get("price") or 0.0)
 
     except Exception as exc:
+        if market_type == "swap":
+            adapter = get_adapter(exchange.id)
+            if adapter.is_pos_mode_error(exc):
+                _clear_hedge_mode(exchange)
+                log.warning(
+                    "[%s] Position mode mismatch on close — cache cleared, "
+                    "will re-detect next cycle",
+                    exchange.id,
+                )
         log.exception("close_long_position failed for %s: %s", symbol, exc)
         result["error"] = str(exc)
 
