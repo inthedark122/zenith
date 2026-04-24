@@ -33,7 +33,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.deps import get_current_user, get_db
-from app.exchange.order_executor import build_authenticated_exchange, close_long_position
+from app.exchange.order_executor import build_authenticated_exchange, close_long_position, liquidate_symbol
 from app.models.exchange import EXCHANGE_STATUS_VERIFIED, UserExchange
 from app.models.strategy import Strategy
 from app.models.subscription import Subscription
@@ -344,25 +344,42 @@ def stop_worker(
         )
         .all()
     )
-    # Attempt to close open positions on the exchange before marking stopped
+    # Attempt to cancel open orders and close open positions on the exchange.
+    # Group by symbol so each position is liquidated exactly once (DCA may
+    # have several DB trades for the same exchange position).
     if worker.user_exchange_id and worker.user_exchange:
         try:
             exchange_client = build_authenticated_exchange(worker.user_exchange)
+
+            # Build {symbol: {market_type, spot_contracts}} from open DB trades
+            symbol_info: dict[str, dict] = {}
             for trade in open_trades:
                 details = trade.details or {}
-                sym_market_type = details.get("market_type", "spot")
-                contracts = float(details.get("contracts") or 0)
-                if contracts > 0:
-                    close_result = close_long_position(
-                        exchange_client, trade.symbol, contracts, sym_market_type
+                sym = trade.symbol
+                if sym not in symbol_info:
+                    symbol_info[sym] = {
+                        "market_type": details.get("market_type", "spot"),
+                        "spot_contracts": 0.0,
+                    }
+                # Accumulate spot contracts in case get_open_position_size is N/A
+                symbol_info[sym]["spot_contracts"] += float(
+                    details.get("contracts") or 0
+                )
+
+            for sym, info in symbol_info.items():
+                errors = liquidate_symbol(
+                    exchange_client,
+                    sym,
+                    info["market_type"],
+                    spot_contracts=info["spot_contracts"],
+                )
+                if errors:
+                    log.warning(
+                        "stop_worker #%d: liquidate %s errors: %s",
+                        worker.id, sym, "; ".join(errors),
                     )
-                    if close_result["error"]:
-                        log.warning(
-                            "stop_worker #%d: failed to close %s on exchange: %s",
-                            worker.id, trade.symbol, close_result["error"],
-                        )
         except Exception as exc:
-            log.error("stop_worker #%d: exchange close failed: %s", worker.id, exc)
+            log.error("stop_worker #%d: exchange cleanup failed: %s", worker.id, exc)
 
     for trade in open_trades:
         trade.status = TradeStatus.CLOSED

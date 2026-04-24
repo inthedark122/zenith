@@ -312,3 +312,59 @@ def get_open_position_size(
     except Exception as exc:
         log.warning("get_open_position_size failed for %s: %s", symbol, exc)
         return None
+
+
+def liquidate_symbol(
+    exchange: ccxt.Exchange,
+    symbol: str,
+    market_type: str,
+    spot_contracts: float = 0.0,
+) -> list[str]:
+    """
+    Cancel all open orders and close any open position for *symbol*.
+
+    For swap markets the live position size is queried directly from the
+    exchange so stale ``contracts`` values in the database are not relied on.
+    For spot markets the caller must supply *spot_contracts* (sum of DB
+    contract amounts for the symbol).
+
+    Returns a list of non-fatal error strings (empty on full success).
+    """
+    errors: list[str] = []
+
+    # ── 1. Cancel all open orders ─────────────────────────────────────────
+    try:
+        open_orders = exchange.fetch_open_orders(symbol)
+        for order in open_orders:
+            order_id = order.get("id")
+            try:
+                exchange.cancel_order(order_id, symbol)
+                log.info("liquidate_symbol: cancelled order %s for %s", order_id, symbol)
+            except Exception as exc:
+                msg = f"cancel order {order_id}: {exc}"
+                log.warning("liquidate_symbol [%s]: %s", symbol, msg)
+                errors.append(msg)
+    except Exception as exc:
+        msg = f"fetch_open_orders: {exc}"
+        log.warning("liquidate_symbol [%s]: %s", symbol, msg)
+        errors.append(msg)
+
+    # ── 2. Close open position ────────────────────────────────────────────
+    if market_type == "swap":
+        size = get_open_position_size(exchange, symbol) or 0.0
+    else:
+        size = spot_contracts
+
+    if size > 0:
+        result = close_long_position(exchange, symbol, size, market_type)
+        if result["error"]:
+            msg = f"close_position ({size}): {result['error']}"
+            log.warning("liquidate_symbol [%s]: %s", symbol, msg)
+            errors.append(msg)
+        else:
+            log.info(
+                "liquidate_symbol: closed %s %.6f @ %.6f",
+                symbol, size, result["filled_price"] or 0,
+            )
+
+    return errors
