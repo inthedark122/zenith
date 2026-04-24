@@ -11,6 +11,7 @@ import Referral from './pages/Referral'
 import Register from './pages/Register'
 import Subscriptions from './pages/Subscriptions'
 import Trading from './pages/Trading'
+import TradingStrategy from './pages/TradingStrategy'
 import UserCenter from './pages/UserCenter'
 import Wallets from './pages/Wallets'
 import useAuthStore from './store/authStore'
@@ -81,6 +82,16 @@ export default function App() {
           <PrivateRoute>
             <Layout>
               <Trading />
+            </Layout>
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/trading/:id"
+        element={
+          <PrivateRoute>
+            <Layout>
+              <TradingStrategy />
             </Layout>
           </PrivateRoute>
         }

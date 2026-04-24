@@ -27,7 +27,7 @@ export default function BottomNav() {
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-card border-t border-border flex justify-around items-center px-0 py-2 pb-[calc(8px+env(safe-area-inset-bottom))] z-[100]">
       {navItems.map((item) => {
-        const active = location.pathname === item.path
+        const active = location.pathname === item.path || location.pathname.startsWith(item.path + '/')
         const Icon = item.icon
         return (
           <div
