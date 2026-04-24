@@ -103,7 +103,7 @@ def run_for_worker(
         if allowed_symbols and symbol not in allowed_symbols:
             continue
         sym_market_type: str = sym_cfg.get("market_type", "spot") if isinstance(sym_cfg, dict) else "spot"
-        sym_leverage: float = float(sym_cfg.get("leverage", strategy.leverage)) if isinstance(sym_cfg, dict) else strategy.leverage
+        sym_leverage: float = float(sym_cfg.get("leverage", 1)) if isinstance(sym_cfg, dict) else 1.0
 
         signal = latest_signals.get(symbol)
         if signal is None:

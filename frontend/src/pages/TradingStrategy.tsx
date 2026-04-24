@@ -498,7 +498,12 @@ export default function TradingStrategy() {
           ) : (
             <>
               <span className="bg-input border border-border rounded-full px-2.5 py-1 text-foreground">
-                Leverage: {strategy.leverage}×
+                {(() => {
+                  const swapSyms = strategy.symbols.filter(s => s.market_type === 'swap')
+                  if (swapSyms.length === 0) return 'Spot'
+                  const leverages = [...new Set(swapSyms.map(s => `${s.leverage}×`))].join('/')
+                  return leverages + ' Futures'
+                })()}
               </span>
               <span className="bg-input border border-border rounded-full px-2.5 py-1 text-foreground">
                 R:R 1:{strategy.rr_ratio}

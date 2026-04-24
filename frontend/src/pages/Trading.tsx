@@ -40,7 +40,14 @@ function StrategyListCard({
               </>
             ) : (
               <>
-                <span>Leverage: <strong className="text-foreground">{strategy.leverage}×</strong></span>
+                <span>Mode: <strong className="text-foreground">{
+                  (() => {
+                    const swapSyms = strategy.symbols.filter(s => s.market_type === 'swap')
+                    if (swapSyms.length === 0) return 'Spot'
+                    const leverages = [...new Set(swapSyms.map(s => `${s.leverage}×`))].join('/')
+                    return leverages + ' Futures'
+                  })()
+                }</strong></span>
                 <span>R:R: <strong className="text-foreground">1:{strategy.rr_ratio}</strong></span>
               </>
             )}

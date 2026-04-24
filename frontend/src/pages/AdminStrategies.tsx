@@ -25,7 +25,6 @@ function defaultPayload(type: StrategyType = 'DCA_MACD_DAILY'): AdminStrategyPay
     name: '',
     strategy: type,
     symbols: [{ symbol: 'BTC/USDT', market_type: 'spot' as const, leverage: 1 }],
-    leverage: type === 'DCA' ? 1 : 20,
     rr_ratio: 2,
     settings: defaultSettings(type),
     is_active: true,
@@ -108,10 +107,6 @@ export default function AdminStrategies() {
                 />
               </div>
               <div>
-                <Label>Leverage</Label>
-                <Input type="number" value={form.leverage} onChange={(e) => setForm((f) => ({ ...f, leverage: Number(e.target.value) }))} className="mt-1" />
-              </div>
-              <div>
                 <Label>Risk : Reward</Label>
                 <Input type="number" step="0.1" value={form.rr_ratio} onChange={(e) => setForm((f) => ({ ...f, rr_ratio: Number(e.target.value) }))} className="mt-1" />
               </div>
@@ -180,7 +175,14 @@ export default function AdminStrategies() {
                 <div className="min-w-0">
                   <div className="text-foreground font-semibold truncate">{s.name}</div>
                   <div className="text-[#a78bfa] text-xs mt-0.5">{s.strategy}</div>
-                  <div className="text-muted-foreground text-xs mt-1">{s.symbols.map(sym => sym.symbol).join(', ')} · {s.leverage}× · R:R 1:{s.rr_ratio}</div>
+                  <div className="text-muted-foreground text-xs mt-1">{s.symbols.map(sym => sym.symbol).join(', ')} · {
+                    (() => {
+                      const swapSyms = s.symbols.filter(sym => sym.market_type === 'swap')
+                      if (swapSyms.length === 0) return 'Spot'
+                      const leverages = [...new Set(swapSyms.map(sym => `${sym.leverage}×`))].join('/')
+                      return leverages + ' Futures'
+                    })()
+                  } · R:R 1:{s.rr_ratio}</div>
                 </div>
                 <div className="flex flex-col items-end gap-2 shrink-0">
                   <Badge variant={s.is_active ? 'success' : 'secondary'}>{s.is_active ? 'Active' : 'Inactive'}</Badge>

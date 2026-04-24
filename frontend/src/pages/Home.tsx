@@ -113,7 +113,13 @@ export default function Home() {
                 {[
                   { label: 'Strategy', value: s.strategy },
                   { label: 'Symbols', value: s.symbols.join(', ') },
-                  { label: 'Leverage', value: `${s.leverage}×` },
+                  { label: 'Mode', value: (() => {
+                      const swapSyms = (s as any).symbols?.filter((sym: any) => sym?.market_type === 'swap') ?? []
+                      if (swapSyms.length === 0) return 'Spot'
+                      const leverages = [...new Set(swapSyms.map((sym: any) => `${sym.leverage}×`))].join('/')
+                      return leverages + ' Futures'
+                    })()
+                  },
                   { label: 'Risk:Reward', value: `1:${s.rr_ratio}` },
                 ].map((row, i, arr) => (
                   <div key={row.label}>

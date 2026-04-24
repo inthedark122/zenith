@@ -24,7 +24,6 @@ class StrategyCreate(BaseModel):
     name: str
     strategy: str = "DCA_MACD_DAILY"
     symbols: List[StrategySymbol]
-    leverage: float = 20.0          # kept for backwards compat / MACD strategy default
     rr_ratio: float = 2.0
     settings: Dict[str, Any] = {}
     is_active: bool = True
@@ -45,13 +44,6 @@ class StrategyCreate(BaseModel):
             raise ValueError("symbols must contain at least one trading pair")
         return v
 
-    @field_validator("leverage")
-    @classmethod
-    def validate_leverage(cls, v: float) -> float:
-        if v <= 0:
-            raise ValueError("leverage must be positive")
-        return v
-
     @field_validator("rr_ratio")
     @classmethod
     def validate_rr(cls, v: float) -> float:
@@ -63,7 +55,6 @@ class StrategyCreate(BaseModel):
 class StrategyUpdate(BaseModel):
     name: Optional[str] = None
     symbols: Optional[List[StrategySymbol]] = None
-    leverage: Optional[float] = None
     rr_ratio: Optional[float] = None
     settings: Optional[Dict[str, Any]] = None
     is_active: Optional[bool] = None

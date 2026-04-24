@@ -145,7 +145,6 @@ export interface Strategy {
   id: number
   name: string
   strategy: string
-  leverage: number
   rr_ratio: number
   symbols: StrategySymbol[]
   settings?: StrategySettings
@@ -231,7 +230,6 @@ export interface AdminStrategyPayload {
   name: string
   strategy: string
   symbols: StrategySymbol[]
-  leverage: number
   rr_ratio: number
   settings: StrategySettings
   is_active: boolean

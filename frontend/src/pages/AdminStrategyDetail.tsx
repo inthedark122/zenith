@@ -181,7 +181,6 @@ export default function AdminStrategyDetail() {
         name: strategy.name,
         strategy: strategy.strategy,
         symbols: strategy.symbols,
-        leverage: strategy.leverage,
         rr_ratio: strategy.rr_ratio,
         settings: strategy.strategy === 'DCA'
           ? {
@@ -286,7 +285,15 @@ export default function AdminStrategyDetail() {
             </Badge>
           </div>
           <div className="text-muted-foreground text-xs mt-1">
-            {strategy.strategy} · {strategy.symbols.map(s => s.symbol).join(', ')} · {strategy.leverage === 1 ? 'Spot' : `${strategy.leverage}× Futures`} · R:R 1:{strategy.rr_ratio}
+            {strategy.strategy} · {strategy.symbols.map(s => s.symbol).join(', ')} · {
+              (() => {
+                const swapSyms = strategy.symbols.filter(s => s.market_type === 'swap')
+                const hasSpot = strategy.symbols.some(s => s.market_type === 'spot')
+                if (swapSyms.length === 0) return 'Spot'
+                const leverages = [...new Set(swapSyms.map(s => `${s.leverage}×`))].join('/')
+                return hasSpot ? `${leverages} Futures + Spot` : `${leverages} Futures`
+              })()
+            } · R:R 1:{strategy.rr_ratio}
           </div>
         </div>
       </div>
@@ -320,7 +327,13 @@ export default function AdminStrategyDetail() {
                 { label: 'Total Backtests', value: String(backtests.length) },
                 { label: 'Public Backtests', value: String(backtests.filter((r) => r.is_public).length) },
                 { label: 'Symbols', value: String(strategy.symbols.length) },
-                { label: 'Mode', value: strategy.leverage === 1 ? 'Spot' : `${strategy.leverage}× Futures` },
+                { label: 'Mode', value: (() => {
+                    const swapSyms = strategy.symbols.filter(s => s.market_type === 'swap')
+                    if (swapSyms.length === 0) return 'Spot'
+                    const leverages = [...new Set(swapSyms.map(s => `${s.leverage}×`))].join('/')
+                    return strategy.symbols.some(s => s.market_type === 'spot') ? `${leverages} Futures + Spot` : `${leverages} Futures`
+                  })()
+                },
               ].map((m) => (
                 <Card key={m.label} className="p-4">
                   <Metric label={m.label} value={m.value} />
@@ -384,10 +397,6 @@ export default function AdminStrategyDetail() {
                   onChange={(syms) => handleFieldChange('symbols', syms)}
                   className="mt-1"
                 />
-              </div>
-              <div>
-                <Label>Leverage <span className="text-muted-foreground font-normal">(1 = Spot, &gt;1 = Futures)</span></Label>
-                <Input type="number" min={1} value={form.leverage} onChange={(e) => handleFieldChange('leverage', Number(e.target.value))} className="mt-1" />
               </div>
               <div>
                 <Label>Risk : Reward</Label>
