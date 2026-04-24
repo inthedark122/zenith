@@ -139,7 +139,8 @@ async def _dispatch_strategy_workers(
 ) -> None:
     """
     Iterate over all running StrategyWorkers and call the matching strategy
-    implementation in a thread so it can safely use synchronous SQLAlchemy.
+    implementation.  Each worker runs in its own thread with its own DB session
+    so blocking I/O (CCXT, DB) does not freeze the asyncio event loop.
     """
     db = SessionLocal()
     try:
@@ -148,32 +149,55 @@ async def _dispatch_strategy_workers(
             .filter(StrategyWorker.status == WorkerStatus.RUNNING)
             .all()
         )
+        worker_ids = [w.id for w in running_workers]
+    finally:
+        db.close()
 
-        for worker in running_workers:
-            strategy_key = worker.strategy.strategy if worker.strategy else None
-            impl = _STRATEGY_IMPL.get(strategy_key)
-            if impl is None:
-                log.warning(
-                    "Worker #%d: no implementation found for strategy '%s'",
-                    worker.id, strategy_key,
-                )
-                continue
-            try:
-                impl.run_for_worker(
-                    worker=worker,
-                    latest_signals=signals,
-                    current_prices=prices,
-                    db=db,
-                )
-            except Exception as exc:
-                log.exception(
-                    "Worker #%d (%s): unhandled error in strategy implementation: %s",
-                    worker.id, strategy_key, exc,
-                )
+    # Run each worker in a thread so sync DB/exchange calls don't block the loop
+    tasks = [
+        asyncio.to_thread(_run_worker_in_thread, wid, signals, prices)
+        for wid in worker_ids
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for wid, result in zip(worker_ids, results):
+        if isinstance(result, Exception):
+            log.exception("Worker #%d: unhandled exception in thread: %s", wid, result)
 
+
+def _run_worker_in_thread(
+    worker_id: int,
+    signals: Dict,
+    prices: Dict[str, float],
+) -> None:
+    """Run one strategy worker with a dedicated DB session (called from a thread)."""
+    db = SessionLocal()
+    try:
+        worker = (
+            db.query(StrategyWorker)
+            .filter(StrategyWorker.id == worker_id)
+            .first()
+        )
+        if worker is None:
+            return
+
+        strategy_key = worker.strategy.strategy if worker.strategy else None
+        impl = _STRATEGY_IMPL.get(strategy_key)
+        if impl is None:
+            log.warning(
+                "Worker #%d: no implementation for strategy '%s'",
+                worker_id, strategy_key,
+            )
+            return
+
+        impl.run_for_worker(
+            worker=worker,
+            latest_signals=signals,
+            current_prices=prices,
+            db=db,
+        )
         db.commit()
     except Exception as exc:
-        log.exception("Error in _dispatch_strategy_workers: %s", exc)
+        log.exception("Worker #%d: error in run_for_worker: %s", worker_id, exc)
         db.rollback()
     finally:
         db.close()

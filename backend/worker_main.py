@@ -4,10 +4,11 @@ Runs the market-listener orchestrator as a dedicated process (GCP COS).
 Acquires a Postgres advisory lock before starting to prevent duplicate
 execution if two instances are accidentally launched at the same time.
 
-Three concurrent async loops:
+Four concurrent async loops:
   - market_listener_loop  — polls market data, dispatches strategy workers
   - validation_loop       — validates new exchange credentials via LISTEN/NOTIFY
   - exchange_sync_loop    — refreshes cached USDT balance every 5 min
+  - order_stream_loop     — real-time WS fill dispatcher (cross-strategy)
 """
 
 import asyncio
@@ -19,6 +20,7 @@ from sqlalchemy import text
 from app.db.session import SessionLocal
 from app.workers.exchange_sync_loop import exchange_sync_loop
 from app.workers.market_listener import market_listener_loop
+from app.workers.order_stream import order_stream_loop
 from app.workers.validation_loop import validation_loop
 
 logging.basicConfig(
@@ -50,6 +52,7 @@ async def main() -> None:
             market_listener_loop(),
             validation_loop(),
             exchange_sync_loop(),
+            order_stream_loop(),
         )
     finally:
         lock_session.close()
