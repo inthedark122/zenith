@@ -52,7 +52,7 @@ from app.strategies.dca_macd_daily.strategy import (
 router = APIRouter(prefix="/trading", tags=["trading"])
 log = logging.getLogger(__name__)
 
-# Concurrent token (worker) limits per plan
+# Active token (symbol) limits per plan — one token = one symbol in any running worker
 _PLAN_MAX_TOKENS = {
     "starter": 1,
     "trader": 2,
@@ -76,6 +76,19 @@ def _get_active_subscription_or_403(user: User, db: Session) -> Subscription:
             detail="An active subscription is required to use trading features",
         )
     return sub
+
+
+def _count_active_tokens(user_id: int, db: Session) -> int:
+    """Return the total number of active symbols across all running workers for a user."""
+    workers = (
+        db.query(StrategyWorker)
+        .filter(
+            StrategyWorker.user_id == user_id,
+            StrategyWorker.status == WorkerStatus.RUNNING,
+        )
+        .all()
+    )
+    return sum(len(w.selected_symbols or []) for w in workers)
 
 
 def _get_strategy_or_404(strategy_id: int, db: Session) -> Strategy:
@@ -202,22 +215,16 @@ def launch_worker(
     sub = _get_active_subscription_or_403(current_user, db)
     strategy = _get_strategy_or_404(payload.strategy_id, db)
 
-    # 2. Plan-based concurrent token limit
+    # 2. Plan-based active token limit
     max_tokens = _PLAN_MAX_TOKENS.get(sub.plan, 1)
-    running_count = (
-        db.query(StrategyWorker)
-        .filter(
-            StrategyWorker.user_id == current_user.id,
-            StrategyWorker.status == WorkerStatus.RUNNING,
-        )
-        .count()
-    )
-    if running_count >= max_tokens:
+    active_token_count = _count_active_tokens(current_user.id, db)
+    new_symbol_count = len(set(payload.selected_symbols or []))
+    if active_token_count + new_symbol_count > max_tokens:
         raise HTTPException(
             status_code=403,
             detail=(
-                f"Your '{sub.plan}' plan allows {max_tokens} concurrent worker(s). "
-                f"Stop an existing worker before starting a new one."
+                f"Your '{sub.plan}' plan allows {max_tokens} active token(s). "
+                f"You have {active_token_count} active. Stop or remove tokens before adding more."
             ),
         )
 
@@ -497,6 +504,21 @@ def start_tokens(
     # Try to find an existing running worker for this strategy+exchange
     existing = _find_running_worker(current_user.id, payload.strategy_id, user_exchange_row.id, db)
 
+    # Plan token limit — check BEFORE merging or creating so no path can bypass it
+    max_tokens = _PLAN_MAX_TOKENS.get(sub.plan, 1)
+    already_active = set(existing.selected_symbols or []) if existing else set()
+    new_symbols = [s for s in payload.symbols if s not in already_active]
+    active_token_count = _count_active_tokens(current_user.id, db)
+    if active_token_count + len(new_symbols) > max_tokens:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Your '{sub.plan}' plan allows {max_tokens} active token(s). "
+                f"You currently have {active_token_count} active. "
+                f"Stop or remove tokens before adding more."
+            ),
+        )
+
     if existing:
         # Add new symbols to the existing worker (set union, preserve order)
         current_syms = list(existing.selected_symbols or [])
@@ -512,25 +534,6 @@ def start_tokens(
         db.commit()
         db.refresh(existing)
         return existing
-
-    # No existing worker — create one (check plan limit first)
-    max_tokens = _PLAN_MAX_TOKENS.get(sub.plan, 1)
-    running_count = (
-        db.query(StrategyWorker)
-        .filter(
-            StrategyWorker.user_id == current_user.id,
-            StrategyWorker.status == WorkerStatus.RUNNING,
-        )
-        .count()
-    )
-    if running_count >= max_tokens:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                f"Your '{sub.plan}' plan allows {max_tokens} concurrent active strateg{'y' if max_tokens == 1 else 'ies'}. "
-                f"Stop an existing strategy before starting a new one."
-            ),
-        )
 
     worker = StrategyWorker(
         user_id=current_user.id,

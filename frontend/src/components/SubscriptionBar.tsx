@@ -10,7 +10,9 @@ export default function SubscriptionBar() {
   const { data: workers = [] } = useWorkers()
 
   const activeSub = subscriptions.find((s) => s.status === 'active') ?? null
-  const runningCount = workers.filter((w) => w.status === 'running').length
+  const runningCount = workers
+    .filter((w) => w.status === 'running')
+    .reduce((sum, w) => sum + (w.selected_symbols?.length ?? 0), 0)
 
   if (!activeSub) {
     return (
@@ -32,7 +34,7 @@ export default function SubscriptionBar() {
         'text-[11px] font-semibold shrink-0',
         slotsExhausted ? 'text-destructive' : 'text-success',
       )}>
-        {runningCount}/{maxSlots} bots running
+        {runningCount}/{maxSlots} tokens active
       </span>
     </div>
   )
