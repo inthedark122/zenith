@@ -55,3 +55,41 @@ class WorkerStopResponse(WorkerResponse):
     """Extended response returned when a worker is force-stopped."""
     closed_trades_count: int = 0
     message: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Token-level start / stop (user-facing, worker is internal)
+# ---------------------------------------------------------------------------
+
+class TokenStartRequest(BaseModel):
+    """
+    Start trading specific symbols for a strategy.
+
+    The backend transparently creates a new StrategyWorker or reuses the
+    existing running one for the same (user, strategy, exchange) combination.
+
+    - margin is only required when no running worker exists yet.
+    - user_exchange_id: None = auto-select the user's default exchange.
+    """
+    strategy_id: int
+    symbols: List[str]
+    margin: Optional[float] = None
+    user_exchange_id: Optional[int] = None
+
+
+class TokenStopRequest(BaseModel):
+    """
+    Stop trading specific symbols for a strategy.
+
+    Symbols are liquidated on the exchange and removed from the running
+    worker.  If no symbols remain the worker is stopped automatically.
+    """
+    strategy_id: int
+    symbols: List[str]
+    user_exchange_id: Optional[int] = None
+
+
+class TokenStopResponse(BaseModel):
+    stopped_symbols: List[str]
+    worker_stopped: bool
+    message: str

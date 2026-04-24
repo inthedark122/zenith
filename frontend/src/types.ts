@@ -205,6 +205,25 @@ export interface LaunchWorkerPayload {
   selected_symbols: string[]
 }
 
+export interface TokenStartPayload {
+  strategy_id: number
+  symbols: string[]
+  margin?: number
+  user_exchange_id?: number
+}
+
+export interface TokenStopPayload {
+  strategy_id: number
+  symbols: string[]
+  user_exchange_id?: number
+}
+
+export interface TokenStopResponse {
+  stopped_symbols: string[]
+  worker_stopped: boolean
+  message: string
+}
+
 export interface Plan {
   plan: string
   coins: number

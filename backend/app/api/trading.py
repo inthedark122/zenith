@@ -42,7 +42,7 @@ from app.models.user import User
 from app.models.worker import StrategyWorker, WorkerStatus
 from app.schemas.strategy import StrategyResponse
 from app.schemas.trade import MACDSignalResponse, StrategyTradeResponse
-from app.schemas.worker import WorkerLaunchRequest, WorkerResponse, WorkerStopResponse
+from app.schemas.worker import WorkerLaunchRequest, WorkerResponse, WorkerStopResponse, TokenStartRequest, TokenStopRequest, TokenStopResponse
 from app.strategies.dca_macd_daily.strategy import (
     STRATEGY_NAME as DCA_MACD_DAILY_STRATEGY_NAME,
     check_daily_trade_status,
@@ -434,6 +434,228 @@ def list_trades(
         .filter(StrategyTrade.user_id == current_user.id)
         .order_by(StrategyTrade.created_at.desc())
         .all()
+    )
+
+
+# ---------------------------------------------------------------------------
+# Token-level start / stop (user-facing — worker is internal)
+# ---------------------------------------------------------------------------
+
+def _find_running_worker(
+    user_id: int,
+    strategy_id: int,
+    user_exchange_id: int,
+    db: Session,
+) -> Optional[StrategyWorker]:
+    return (
+        db.query(StrategyWorker)
+        .filter(
+            StrategyWorker.user_id == user_id,
+            StrategyWorker.strategy_id == strategy_id,
+            StrategyWorker.user_exchange_id == user_exchange_id,
+            StrategyWorker.status == WorkerStatus.RUNNING,
+        )
+        .first()
+    )
+
+
+@router.post("/tokens/start", response_model=WorkerResponse)
+def start_tokens(
+    payload: TokenStartRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Start trading specific tokens for a strategy.
+
+    The backend transparently creates a new worker or adds the symbols to the
+    existing running worker for the same (user, strategy, exchange).  Workers
+    are never exposed to the caller — only the resulting active state matters.
+    """
+    sub = _get_active_subscription_or_403(current_user, db)
+    strategy = _get_strategy_or_404(payload.strategy_id, db)
+
+    # Resolve exchange
+    if payload.user_exchange_id:
+        user_exchange_row = (
+            db.query(UserExchange)
+            .filter(
+                UserExchange.id == payload.user_exchange_id,
+                UserExchange.user_id == current_user.id,
+            )
+            .first()
+        )
+        if user_exchange_row is None:
+            raise HTTPException(status_code=404, detail="Exchange not found")
+    else:
+        user_exchange_row = _resolve_user_exchange(current_user.id, db)
+
+    if user_exchange_row is None:
+        raise HTTPException(status_code=400, detail="No exchange connected. Connect an API key first.")
+    if user_exchange_row.status != EXCHANGE_STATUS_VERIFIED:
+        raise HTTPException(status_code=400, detail="Exchange credentials are not verified.")
+
+    # Validate symbols
+    if not payload.symbols:
+        raise HTTPException(status_code=400, detail="Select at least one token to trade.")
+    strategy_symbol_set = {
+        (s.get("symbol", "") if isinstance(s, dict) else s.symbol)
+        for s in (strategy.symbols or [])
+    }
+    invalid = [s for s in payload.symbols if s not in strategy_symbol_set]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Symbol(s) not in strategy: {', '.join(invalid)}")
+
+    # Try to find an existing running worker for this strategy+exchange
+    existing = _find_running_worker(current_user.id, payload.strategy_id, user_exchange_row.id, db)
+
+    if existing:
+        # Add new symbols to the existing worker (set union, preserve order)
+        current_syms = list(existing.selected_symbols or [])
+        merged = current_syms + [s for s in payload.symbols if s not in current_syms]
+        existing.selected_symbols = merged
+        db.commit()
+        db.refresh(existing)
+        return existing
+
+    # No existing worker — create one (check plan limit first)
+    max_tokens = _PLAN_MAX_TOKENS.get(sub.plan, 1)
+    running_count = (
+        db.query(StrategyWorker)
+        .filter(
+            StrategyWorker.user_id == current_user.id,
+            StrategyWorker.status == WorkerStatus.RUNNING,
+        )
+        .count()
+    )
+    if running_count >= max_tokens:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Your '{sub.plan}' plan allows {max_tokens} concurrent active strateg{'y' if max_tokens == 1 else 'ies'}. "
+                f"Stop an existing strategy before starting a new one."
+            ),
+        )
+
+    # Margin is required when creating a new worker
+    if payload.margin is None or payload.margin <= 0:
+        raise HTTPException(status_code=400, detail="Budget (margin) is required when activating a strategy for the first time.")
+
+    margin = Decimal(str(payload.margin))
+    if user_exchange_row.balance_usdt_free is not None:
+        available = Decimal(str(user_exchange_row.balance_usdt_free))
+        if margin > available:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient balance: ${margin} USDT > available ${available:.2f} USDT",
+            )
+
+    worker = StrategyWorker(
+        user_id=current_user.id,
+        strategy_id=payload.strategy_id,
+        margin=margin,
+        exchange_id=user_exchange_row.exchange_id,
+        user_exchange_id=user_exchange_row.id,
+        selected_symbols=list(payload.symbols),
+        status=WorkerStatus.RUNNING,
+    )
+    db.add(worker)
+    db.commit()
+    db.refresh(worker)
+    return worker
+
+
+@router.post("/tokens/stop", response_model=TokenStopResponse)
+def stop_tokens(
+    payload: TokenStopRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Stop trading specific tokens for a strategy.
+
+    Each symbol is liquidated on the exchange (open orders cancelled, open
+    position closed) then removed from the worker's selected_symbols.
+    If no symbols remain, the worker is stopped entirely.
+    """
+    # Resolve exchange
+    if payload.user_exchange_id:
+        user_exchange_row = (
+            db.query(UserExchange)
+            .filter(
+                UserExchange.id == payload.user_exchange_id,
+                UserExchange.user_id == current_user.id,
+            )
+            .first()
+        )
+        if user_exchange_row is None:
+            raise HTTPException(status_code=404, detail="Exchange not found")
+    else:
+        user_exchange_row = _resolve_user_exchange(current_user.id, db)
+
+    if user_exchange_row is None:
+        raise HTTPException(status_code=400, detail="No exchange connected.")
+
+    worker = _find_running_worker(current_user.id, payload.strategy_id, user_exchange_row.id, db)
+    if worker is None:
+        raise HTTPException(status_code=404, detail="No active trading session found for this strategy.")
+
+    if not payload.symbols:
+        raise HTTPException(status_code=400, detail="Specify at least one token to stop.")
+
+    # Liquidate each symbol on the exchange
+    open_trades = (
+        db.query(StrategyTrade)
+        .filter(
+            StrategyTrade.worker_id == worker.id,
+            StrategyTrade.status == TradeStatus.OPEN,
+            StrategyTrade.symbol.in_(payload.symbols),
+        )
+        .all()
+    )
+
+    symbol_info: dict[str, dict] = {}
+    for trade in open_trades:
+        details = trade.details or {}
+        sym = trade.symbol
+        if sym not in symbol_info:
+            symbol_info[sym] = {"market_type": details.get("market_type", "spot"), "spot_contracts": 0.0}
+        symbol_info[sym]["spot_contracts"] += float(details.get("contracts") or 0)
+
+    if symbol_info and worker.user_exchange:
+        try:
+            exchange_client = build_authenticated_exchange(worker.user_exchange)
+            for sym, info in symbol_info.items():
+                errors = liquidate_symbol(exchange_client, sym, info["market_type"], spot_contracts=info["spot_contracts"])
+                if errors:
+                    log.warning("stop_tokens worker #%d: liquidate %s errors: %s", worker.id, sym, "; ".join(errors))
+        except Exception as exc:
+            log.error("stop_tokens worker #%d: exchange cleanup failed: %s", worker.id, exc)
+
+    for trade in open_trades:
+        trade.status = TradeStatus.CLOSED
+
+    # Remove stopped symbols from worker
+    remaining = [s for s in (worker.selected_symbols or []) if s not in payload.symbols]
+    worker_stopped = len(remaining) == 0
+
+    if worker_stopped:
+        worker.status = WorkerStatus.STOPPED
+        worker.stopped_at = datetime.utcnow()
+        worker.selected_symbols = []
+    else:
+        worker.selected_symbols = remaining
+
+    db.commit()
+
+    return TokenStopResponse(
+        stopped_symbols=list(payload.symbols),
+        worker_stopped=worker_stopped,
+        message=(
+            f"Stopped {len(payload.symbols)} token(s). Trading session ended."
+            if worker_stopped
+            else f"Stopped {len(payload.symbols)} token(s). {len(remaining)} still active."
+        ),
     )
 
 

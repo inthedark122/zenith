@@ -1,4 +1,4 @@
-import { LaunchWorkerPayload, Signal, Strategy, Trade, Worker } from '../types'
+import { LaunchWorkerPayload, Signal, Strategy, TokenStartPayload, TokenStopPayload, TokenStopResponse, Trade, Worker } from '../types'
 import client from './client'
 
 export const tradingApi = {
@@ -14,4 +14,8 @@ export const tradingApi = {
     client.post<Worker>('/trading/launch', payload).then((r) => r.data),
   stopWorker: (workerId: number): Promise<Worker> =>
     client.post<Worker>(`/trading/stop/${workerId}`).then((r) => r.data),
+  startTokens: (payload: TokenStartPayload): Promise<Worker> =>
+    client.post<Worker>('/trading/tokens/start', payload).then((r) => r.data),
+  stopTokens: (payload: TokenStopPayload): Promise<TokenStopResponse> =>
+    client.post<TokenStopResponse>('/trading/tokens/stop', payload).then((r) => r.data),
 }

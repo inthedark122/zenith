@@ -1,13 +1,11 @@
-import { ArrowLeft, ChevronRight } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react'
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
 import { useNavigate, useParams } from 'react-router-dom'
 
-import { tradingApi } from '../api/trading'
 import { useExchanges } from '../hooks/useExchanges'
 import { useMySubs } from '../hooks/useSubscriptions'
-import { useLaunchWorker, useStopWorker, useStrategies, useTrades, useWorkers } from '../hooks/useTrading'
-import { Exchange, Signal, Strategy, Subscription, Trade, Worker } from '../types'
+import { useStartTokens, useStopTokens, useStrategies, useTrades, useWorkers } from '../hooks/useTrading'
+import { Exchange, Strategy, Subscription, Trade, Worker } from '../types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -15,252 +13,316 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 
-interface MarginFormValues {
-  margin: string
-  user_exchange_id: string
-}
-
 // ---------------------------------------------------------------------------
-// Start-worker form
+// Tokens panel — replaces StartWorkerForm + WorkerCard
 // ---------------------------------------------------------------------------
 
-function StartWorkerForm({
+function TokensPanel({
   strategy,
-  subscription,
   exchanges,
-  runningCount,
-  onLaunched,
+  subscription,
+  workers,
 }: {
   strategy: Strategy
-  subscription: Subscription | null
   exchanges: Exchange[]
-  runningCount: number
-  onLaunched?: () => void
+  subscription: Subscription | null
+  workers: Worker[]
 }) {
-  const {
-    register,
-    handleSubmit,
-    reset,
-    watch,
-    formState: { errors },
-  } = useForm<MarginFormValues>()
-  const [signal, setSignal] = useState<Signal | null>(null)
-  const [signalLoading, setSignalLoading] = useState(false)
-  const [signalError, setSignalError] = useState('')
-  const [selectedSymbols, setSelectedSymbols] = useState<string[]>([])
-  const launchWorker = useLaunchWorker()
+  const verifiedExchanges = exchanges.filter((e) => e.status === 'verified')
+
+  // Auto-select exchange: prefer one that has a running worker for this strategy
+  const runningWorker = workers.find((w) => w.strategy_id === strategy.id && w.status === 'running')
+  const defaultExchangeId = runningWorker?.user_exchange_id
+    ? String(runningWorker.user_exchange_id)
+    : verifiedExchanges[0]
+    ? String(verifiedExchanges[0].id)
+    : ''
+
+  const [selectedExchangeId, setSelectedExchangeId] = useState(defaultExchangeId)
+  const [budget, setBudget] = useState('')
+  const [selectedForStart, setSelectedForStart] = useState<string[]>([])
+  const [selectedForStop, setSelectedForStop] = useState<string[]>([])
+
+  const startTokens = useStartTokens()
+  const stopTokens = useStopTokens()
+
+  const userExchangeId = selectedExchangeId ? parseInt(selectedExchangeId) : undefined
+  const activeWorker = workers.find(
+    (w) =>
+      w.strategy_id === strategy.id &&
+      w.status === 'running' &&
+      (w.user_exchange_id === userExchangeId || (!userExchangeId && w.status === 'running')),
+  )
+  const activeSymbols: string[] = activeWorker?.selected_symbols ?? []
+  const currentMargin = activeWorker ? parseFloat(String(activeWorker.margin)) : null
+
+  const allSymbols = (strategy.symbols ?? []).map((s) => s.symbol)
+  const inactiveSymbols = allSymbols.filter((s) => !activeSymbols.includes(s))
+
+  const toggleStartSelect = (sym: string) =>
+    setSelectedForStart((prev) => (prev.includes(sym) ? prev.filter((s) => s !== sym) : [...prev, sym]))
+  const toggleStopSelect = (sym: string) =>
+    setSelectedForStop((prev) => (prev.includes(sym) ? prev.filter((s) => s !== sym) : [...prev, sym]))
+
+  const effectiveBudget = currentMargin !== null ? currentMargin : parseFloat(budget)
+  const budgetValid = currentMargin !== null || (budget !== '' && parseFloat(budget) > 0)
 
   const planMax: Record<string, number> = { starter: 1, trader: 2, pro: 3 }
   const maxSlots = planMax[subscription?.plan ?? ''] ?? 1
-  const slotsExhausted = runningCount >= maxSlots
-  const isDCA = strategy.strategy === 'DCA'
+  const runningCount = workers.filter((w) => w.status === 'running').length
+  const canStartNew = !activeWorker && runningCount < maxSlots && !!subscription
 
-  const verifiedExchanges = exchanges.filter((e) => e.status === 'verified')
-  const selectedExchangeId = watch('user_exchange_id')
-  const selectedExchange = verifiedExchanges.find((e) => String(e.id) === selectedExchangeId)
-  const availableBalance = selectedExchange?.balance_usdt_free ?? null
-  const maxMargin = availableBalance ?? 0
-
-  const selectableSymbols = (strategy.symbols ?? []).map((s) => s.symbol)
-
-  const toggleSymbol = (sym: string) =>
-    setSelectedSymbols((prev) =>
-      prev.includes(sym) ? prev.filter((s) => s !== sym) : [...prev, sym],
+  const handleStartAll = () => {
+    if (!budgetValid || (!activeWorker && !canStartNew)) return
+    startTokens.mutate(
+      { strategy_id: strategy.id, symbols: inactiveSymbols, margin: effectiveBudget, user_exchange_id: userExchangeId },
+      { onSuccess: () => setSelectedForStart([]) },
     )
-
-  const fetchSignal = async () => {
-    setSignalLoading(true)
-    setSignalError('')
-    try {
-      setSignal(await tradingApi.getSignal(strategy.id))
-    } catch (err) {
-      setSignalError(err instanceof Error ? err.message : 'Failed to fetch signal')
-    } finally {
-      setSignalLoading(false)
-    }
   }
 
-  const canStart =
-    !!subscription && !slotsExhausted && verifiedExchanges.length > 0 && selectedSymbols.length > 0
+  const handleStartSelected = () => {
+    if (!budgetValid || (!activeWorker && !canStartNew) || selectedForStart.length === 0) return
+    startTokens.mutate(
+      { strategy_id: strategy.id, symbols: selectedForStart, margin: effectiveBudget, user_exchange_id: userExchangeId },
+      { onSuccess: () => setSelectedForStart([]) },
+    )
+  }
 
-  const onSubmit = (data: MarginFormValues) => {
-    launchWorker.mutate(
-      {
-        strategy_id: strategy.id,
-        margin: parseFloat(data.margin),
-        user_exchange_id: data.user_exchange_id ? parseInt(data.user_exchange_id) : undefined,
-        selected_symbols: selectedSymbols,
-      },
-      {
-        onSuccess: () => {
-          reset()
-          setSignal(null)
-          setSelectedSymbols([])
-          onLaunched?.()
-        },
-      },
+  const handleStopAll = () => {
+    if (activeSymbols.length === 0) return
+    stopTokens.mutate(
+      { strategy_id: strategy.id, symbols: activeSymbols, user_exchange_id: userExchangeId },
+      { onSuccess: () => setSelectedForStop([]) },
+    )
+  }
+
+  const handleStopSelected = () => {
+    if (selectedForStop.length === 0) return
+    stopTokens.mutate(
+      { strategy_id: strategy.id, symbols: selectedForStop, user_exchange_id: userExchangeId },
+      { onSuccess: () => setSelectedForStop([]) },
+    )
+  }
+
+  if (verifiedExchanges.length === 0) {
+    return (
+      <Card className="p-4 border-border bg-input text-center">
+        <p className="text-muted-foreground text-sm">Connect and verify an exchange to start trading.</p>
+      </Card>
+    )
+  }
+
+  if (!subscription) {
+    return (
+      <Card className="p-4 border-border bg-input text-center">
+        <p className="text-muted-foreground text-sm">An active subscription is required to trade.</p>
+      </Card>
     )
   }
 
   return (
-    <div className="space-y-3">
-      {/* Signal card */}
-      {signal && (
-        <Card className="p-3.5 bg-input border-border">
-          <div className="flex justify-between mb-1.5">
-            <span className="text-muted-foreground text-xs">MACD</span>
-            <span className="text-foreground text-xs font-semibold">{signal.macd.toFixed(4)}</span>
+    <div className="space-y-4">
+      {/* Exchange selector */}
+      {verifiedExchanges.length > 1 && (
+        <div>
+          <Label className="text-xs text-muted-foreground mb-1.5 block">Exchange</Label>
+          <div className="flex flex-wrap gap-2">
+            {verifiedExchanges.map((ex) => (
+              <button
+                key={ex.id}
+                onClick={() => {
+                  setSelectedExchangeId(String(ex.id))
+                  setSelectedForStart([])
+                  setSelectedForStop([])
+                }}
+                className={cn(
+                  'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
+                  selectedExchangeId === String(ex.id)
+                    ? 'bg-[#6c47ff] border-[#6c47ff] text-white'
+                    : 'bg-input border-border text-muted-foreground hover:border-[#6c47ff]',
+                )}
+              >
+                {ex.exchange_id.toUpperCase()}
+                {ex.balance_usdt_free != null && (
+                  <span className="ml-1 opacity-70">${parseFloat(String(ex.balance_usdt_free)).toFixed(0)}</span>
+                )}
+              </button>
+            ))}
           </div>
-          <div className="flex justify-between mb-1.5">
-            <span className="text-muted-foreground text-xs">Signal line</span>
-            <span className="text-foreground text-xs font-semibold">{signal.signal.toFixed(4)}</span>
+        </div>
+      )}
+
+      {/* Budget */}
+      <div>
+        <Label className="text-xs text-muted-foreground mb-1.5 block">
+          Total DCA budget (USDT)
+        </Label>
+        {currentMargin !== null ? (
+          <div className="flex items-center gap-2">
+            <div className="bg-input border border-border rounded-lg px-3 py-2 text-sm text-foreground font-semibold w-32">
+              ${currentMargin.toFixed(2)}
+            </div>
+            <span className="text-muted-foreground text-xs">Active — budget locked</span>
           </div>
-          <div className="flex justify-between mb-1.5">
-            <span className="text-muted-foreground text-xs">D1 Cross</span>
-            {signal.is_bullish_crossover ? (
-              <span className="text-success text-xs font-bold">🟢 Bullish — LONG ready</span>
-            ) : signal.is_bearish_crossover ? (
-              <span className="text-destructive text-xs font-bold">🔴 Bearish — avoid longs</span>
-            ) : (
-              <span className="text-muted-foreground text-xs font-semibold">No crossover</span>
+        ) : (
+          <div className="space-y-1">
+            <Input
+              type="number"
+              min="0.1"
+              step="0.1"
+              placeholder="e.g. 10.00"
+              value={budget}
+              onChange={(e) => setBudget(e.target.value)}
+              className="w-40 text-sm"
+            />
+            <p className="text-muted-foreground text-xs">
+              Split proportionally across all DCA orders per token cycle
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Tokens */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <Label className="text-xs text-muted-foreground">Tokens</Label>
+          <div className="flex gap-2">
+            {inactiveSymbols.length > 0 && (
+              <button
+                className="text-xs text-[#a78bfa] hover:text-[#6c47ff] transition-colors"
+                onClick={() =>
+                  setSelectedForStart((prev) =>
+                    prev.length === inactiveSymbols.length ? [] : [...inactiveSymbols],
+                  )
+                }
+              >
+                {selectedForStart.length === inactiveSymbols.length ? 'Deselect all' : 'Select all inactive'}
+              </button>
             )}
           </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground text-xs">Today</span>
-            <span className={cn('text-xs font-semibold', signal.can_open_trade ? 'text-success' : 'text-destructive')}>
-              {signal.can_open_trade ? `Entry #${signal.next_entry_number} available` : 'Daily limit reached'}
-            </span>
-          </div>
-        </Card>
-      )}
-
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
-        {/* Exchange */}
-        <div>
-          <Label className="mb-1 block">Exchange API Key</Label>
-          {verifiedExchanges.length === 0 ? (
-            <p className="text-destructive text-xs">No verified exchange connected. Add one in Exchanges.</p>
-          ) : (
-            <select
-              {...register('user_exchange_id', { required: 'Select an exchange' })}
-              className="w-full rounded-md border border-input bg-background text-foreground text-sm px-3 py-2 focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              <option value="">Select exchange…</option>
-              {verifiedExchanges.map((exc) => (
-                <option key={exc.id} value={exc.id}>
-                  {exc.exchange_id.toUpperCase()}{exc.label ? ` — ${exc.label}` : ''}{' '}
-                  {exc.balance_usdt_free != null ? `($${exc.balance_usdt_free.toFixed(2)} free)` : ''}
-                </option>
-              ))}
-            </select>
-          )}
-          {errors.user_exchange_id && (
-            <p className="text-destructive text-xs mt-1">{errors.user_exchange_id.message}</p>
-          )}
         </div>
 
-        {/* Symbols */}
-        <div>
-          <Label className="mb-1 block">Tokens to trade</Label>
-          {selectableSymbols.length === 0 ? (
-            <p className="text-destructive text-xs">No tokens available.</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {selectableSymbols.map((symbol) => {
-                const sym = strategy.symbols?.find((s) => s.symbol === symbol)
-                const isSelected = selectedSymbols.includes(symbol)
-                return (
-                  <button
-                    key={symbol}
-                    type="button"
-                    onClick={() => toggleSymbol(symbol)}
-                    className={cn(
-                      'flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors cursor-pointer',
-                      isSelected
-                        ? 'bg-[#6c47ff] border-[#6c47ff] text-white'
-                        : 'bg-input border-border text-foreground hover:border-[#6c47ff]',
-                    )}
-                  >
-                    {sym && (
-                      <span className={sym.market_type === 'swap' ? 'text-amber-400' : 'text-emerald-400'}>
-                        {sym.market_type === 'swap' ? 'P' : 'S'}
-                      </span>
-                    )}
-                    {symbol}
-                    {sym?.market_type === 'swap' && <span className="opacity-70">{sym.leverage}×</span>}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-          {selectableSymbols.length > 0 && selectedSymbols.length === 0 && (
-            <p className="text-muted-foreground text-xs mt-1">Select at least one token</p>
-          )}
+        <div className="flex flex-wrap gap-2">
+          {/* Active tokens */}
+          {activeSymbols.map((sym) => {
+            const forStop = selectedForStop.includes(sym)
+            return (
+              <button
+                key={sym}
+                onClick={() => toggleStopSelect(sym)}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all',
+                  forStop
+                    ? 'bg-destructive/20 border-destructive text-destructive'
+                    : 'bg-green-500/10 border-green-500/40 text-green-400 hover:border-destructive/60',
+                )}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+                {sym.replace('/USDT', '')}
+                {forStop && <XCircle size={11} className="opacity-80" />}
+              </button>
+            )
+          })}
+
+          {/* Inactive tokens */}
+          {inactiveSymbols.map((sym) => {
+            const forStart = selectedForStart.includes(sym)
+            return (
+              <button
+                key={sym}
+                onClick={() => toggleStartSelect(sym)}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all',
+                  forStart
+                    ? 'bg-[#6c47ff]/20 border-[#6c47ff] text-[#a78bfa]'
+                    : 'bg-input border-border text-muted-foreground hover:border-[#6c47ff]/50',
+                )}
+              >
+                {sym.replace('/USDT', '')}
+                {forStart && <CheckCircle2 size={11} className="opacity-80" />}
+              </button>
+            )
+          })}
         </div>
 
-        {/* Budget */}
-        <div>
-          <Label className="mb-1 block">
-            {isDCA ? 'Total DCA budget (USDT)' : 'Margin (USDT)'}{' '}
-            {availableBalance != null ? (
-              <span className="text-foreground font-semibold">— available: ${availableBalance.toFixed(2)}</span>
-            ) : selectedExchange ? (
-              <span className="text-muted-foreground font-normal">— balance syncing…</span>
-            ) : null}
-          </Label>
-          <Input
-            type="number"
-            placeholder={availableBalance != null ? `0.1 – ${availableBalance.toFixed(2)}` : 'e.g. 100'}
-            min="0.1"
-            max={maxMargin > 0 ? maxMargin : undefined}
-            step="any"
-            {...register('margin', {
-              required: 'Enter a valid amount',
-              min: { value: 0.1, message: 'Minimum is $0.10' },
-              ...(maxMargin > 0 && {
-                max: { value: maxMargin, message: `Exceeds available balance ($${maxMargin.toFixed(2)})` },
-              }),
-            })}
-          />
-          {errors.margin && <p className="text-destructive text-xs mt-1">{errors.margin.message}</p>}
-        </div>
+        {allSymbols.length === 0 && (
+          <p className="text-muted-foreground text-xs mt-2">No tokens configured for this strategy.</p>
+        )}
+      </div>
 
-        <div className="flex gap-2">
-          {!isDCA && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={fetchSignal}
-              disabled={signalLoading}
-              className="text-[#a78bfa] border-[#6c47ff]"
-            >
-              {signalLoading ? '…' : '📊 Signal'}
-            </Button>
-          )}
-          <Button type="submit" size="sm" disabled={launchWorker.isPending || !canStart} className="flex-1">
-            {launchWorker.isPending
-              ? 'Starting…'
-              : slotsExhausted
-              ? 'All slots in use'
-              : !subscription
-              ? 'Subscription required'
-              : verifiedExchanges.length === 0
-              ? 'Connect API key first'
-              : selectedSymbols.length === 0
-              ? 'Select at least one token'
-              : '▶ Start Worker'}
+      {/* Quick actions */}
+      <div className="flex flex-wrap gap-2">
+        {inactiveSymbols.length > 0 && (
+          <Button
+            size="sm"
+            onClick={handleStartAll}
+            disabled={startTokens.isPending || !budgetValid || (!activeWorker && !canStartNew)}
+            className="bg-[#6c47ff] hover:bg-[#5a3de8] text-white text-xs"
+          >
+            {startTokens.isPending ? 'Starting…' : `▶ Start All (${inactiveSymbols.length})`}
           </Button>
-        </div>
-      </form>
+        )}
+        {selectedForStart.length > 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleStartSelected}
+            disabled={startTokens.isPending || !budgetValid || (!activeWorker && !canStartNew)}
+            className="text-xs"
+          >
+            {startTokens.isPending ? 'Starting…' : `▶ Start Selected (${selectedForStart.length})`}
+          </Button>
+        )}
+        {activeSymbols.length > 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleStopAll}
+            disabled={stopTokens.isPending}
+            className="border-destructive/50 text-destructive hover:bg-destructive/10 text-xs"
+          >
+            {stopTokens.isPending ? 'Stopping…' : `⏹ Stop All`}
+          </Button>
+        )}
+        {selectedForStop.length > 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleStopSelected}
+            disabled={stopTokens.isPending}
+            className="border-destructive/50 text-destructive hover:bg-destructive/10 text-xs"
+          >
+            {stopTokens.isPending ? 'Stopping…' : `⏹ Stop Selected (${selectedForStop.length})`}
+          </Button>
+        )}
+      </div>
 
-      {signalError && <p className="text-destructive text-xs mt-1">{signalError}</p>}
-      {launchWorker.error && (
-        <p className="text-destructive text-xs mt-1">{launchWorker.error.message ?? 'Failed to start worker'}</p>
+      {/* Plan limit warning */}
+      {!activeWorker && runningCount >= maxSlots && (
+        <p className="text-yellow-400 text-xs">
+          Plan limit reached ({maxSlots} active strateg{maxSlots === 1 ? 'y' : 'ies'}). Stop another strategy to start this one.
+        </p>
       )}
-      {launchWorker.isSuccess && (
-        <p className="text-success text-xs mt-1">
-          Worker started! It will open trades automatically{isDCA ? '.' : ' when signals fire.'}
+
+      {/* Feedback */}
+      {startTokens.isSuccess && (
+        <p className="text-green-400 text-xs">
+          ✓ Tokens activated. Trading started automatically in the background.
+        </p>
+      )}
+      {startTokens.isError && (
+        <p className="text-destructive text-xs">
+          {startTokens.error instanceof Error ? startTokens.error.message : 'Failed to start tokens'}
+        </p>
+      )}
+      {stopTokens.isSuccess && (
+        <p className="text-muted-foreground text-xs">
+          ✓ {(stopTokens.data as { message?: string })?.message ?? 'Tokens stopped.'}
+        </p>
+      )}
+      {stopTokens.isError && (
+        <p className="text-destructive text-xs">
+          {stopTokens.error instanceof Error ? stopTokens.error.message : 'Failed to stop tokens'}
         </p>
       )}
     </div>
@@ -268,140 +330,31 @@ function StartWorkerForm({
 }
 
 // ---------------------------------------------------------------------------
-// Worker card
-// ---------------------------------------------------------------------------
-
-function WorkerCard({ worker, trades }: { worker: Worker; trades: Trade[] }) {
-  const stopWorker = useStopWorker()
-  const isRunning = worker.status === 'running'
-
-  const openPositions = trades.filter((t) => t.worker_id === worker.id && t.status === 'open')
-
-  const activeTokens =
-    worker.selected_symbols && worker.selected_symbols.length > 0
-      ? worker.selected_symbols
-      : worker.strategy_symbols ?? []
-
-  return (
-    <Card className="p-4 bg-input border-border">
-      <div className="flex justify-between items-center mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-foreground font-bold text-sm">Worker #{worker.id}</span>
-          <Badge variant={isRunning ? 'success' : 'secondary'}>{worker.status.toUpperCase()}</Badge>
-        </div>
-        <span className="text-muted-foreground text-xs">
-          {worker.started_at ? new Date(worker.started_at).toLocaleDateString() : ''}
-        </span>
-      </div>
-
-      {activeTokens.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-2">
-          {activeTokens.map((sym) => (
-            <Badge key={sym} variant="default" className="text-xs">{sym}</Badge>
-          ))}
-        </div>
-      )}
-
-      <div className="flex gap-4 text-xs mb-3 flex-wrap">
-        <div>
-          <div className="text-muted-foreground">Exchange</div>
-          <div className="text-foreground font-semibold">{worker.exchange_id.toUpperCase()}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground">Budget</div>
-          <div className="text-foreground font-semibold">${parseFloat(worker.margin).toFixed(2)}</div>
-        </div>
-        {worker.stopped_at && (
-          <div>
-            <div className="text-muted-foreground">Stopped</div>
-            <div className="text-foreground font-semibold">{new Date(worker.stopped_at).toLocaleDateString()}</div>
-          </div>
-        )}
-      </div>
-
-      {openPositions.length > 0 && (
-        <div className="mb-3">
-          <div className="text-muted-foreground text-xs mb-1.5 font-medium">
-            Open positions ({openPositions.length})
-          </div>
-          <div className="flex flex-col gap-1.5">
-            {openPositions.map((pos) => {
-              const d = pos.details ?? {}
-              return (
-                <div key={pos.id} className="bg-muted/40 rounded-lg px-3 py-2 flex justify-between items-center">
-                  <div>
-                    <span className="text-foreground font-semibold text-xs">{pos.symbol}</span>
-                    {d.market_type && (
-                      <span className="text-muted-foreground text-xs ml-1.5">
-                        {String(d.market_type).toUpperCase()}
-                        {d.leverage && d.leverage > 1 ? ` ${d.leverage}×` : ''}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-right text-xs">
-                    {d.entry_price && (
-                      <span className="text-foreground font-semibold">
-                        @ ${parseFloat(String(d.entry_price)).toFixed(4)}
-                      </span>
-                    )}
-                    {d.take_profit_price && (
-                      <span className="text-success ml-2">
-                        TP ${parseFloat(String(d.take_profit_price)).toFixed(4)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {isRunning && (
-        <Button
-          variant="danger"
-          size="sm"
-          onClick={() => stopWorker.mutate(worker.id)}
-          disabled={stopWorker.isPending}
-        >
-          {stopWorker.isPending ? 'Stopping…' : '⏹ Stop Worker'}
-        </Button>
-      )}
-    </Card>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Trade row
+// Trade item
 // ---------------------------------------------------------------------------
 
 function TradeItem({ trade }: { trade: Trade }) {
   const d = trade.details ?? {}
-  const badgeVariantMap: Record<string, 'success' | 'destructive' | 'warning'> = {
-    win: 'success',
-    loss: 'destructive',
-    open: 'warning',
-  }
+  const isOpen = trade.status === 'open'
   return (
-    <Card className="p-4 bg-input border-border">
-      <div className="flex justify-between items-center mb-2">
-        <div className="text-foreground font-bold text-sm">
-          {trade.symbol}
-          {d.dca_order_number != null && (
-            <span className="text-muted-foreground text-xs font-normal ml-1.5">DCA #{d.dca_order_number}</span>
-          )}
-          {d.entry_number != null && (
-            <span className="text-muted-foreground text-xs font-normal ml-1.5">#{d.entry_number}</span>
-          )}
+    <Card className="p-3 bg-input border-border">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-foreground font-semibold text-sm">{trade.symbol}</span>
+          <Badge variant={isOpen ? 'secondary' : trade.status === 'win' ? 'success' : 'destructive'} className="text-xs">
+            {trade.status.toUpperCase()}
+          </Badge>
         </div>
-        <Badge variant={badgeVariantMap[trade.status] ?? 'warning'}>{trade.status.toUpperCase()}</Badge>
+        {trade.exchange && (
+          <span className="text-muted-foreground text-xs">{trade.exchange.toUpperCase()}</span>
+        )}
       </div>
-      <div className="flex gap-4 flex-wrap text-xs">
+      <div className="grid grid-cols-2 gap-1.5 text-xs">
         {[
           { l: 'Entry', v: d.entry_price ? `$${parseFloat(String(d.entry_price)).toFixed(4)}` : '—' },
           { l: 'TP', v: d.take_profit_price ? `$${parseFloat(String(d.take_profit_price)).toFixed(4)}` : '—' },
           { l: 'SL', v: d.stop_loss_price ? `$${parseFloat(String(d.stop_loss_price)).toFixed(4)}` : '—' },
-          { l: 'Amount', v: d.margin ? `$${parseFloat(String(d.margin)).toFixed(2)}` : '—' },
+          { l: 'Budget', v: d.margin ? `$${parseFloat(String(d.margin)).toFixed(2)}` : '—' },
           { l: 'Leverage', v: d.leverage ? `${d.leverage}×` : '—' },
         ]
           .filter(({ v }) => v !== '—')
@@ -435,7 +388,6 @@ export default function TradingStrategy() {
 
   const activeSub: Subscription | null = subscriptions.find((s) => s.status === 'active') ?? null
   const strategyWorkers = workers.filter((w) => w.strategy_id === strategyId)
-  const runningWorkers = strategyWorkers.filter((w) => w.status === 'running')
   const strategyTradeIds = new Set(strategyWorkers.map((w) => w.id))
   const strategyTrades = trades.filter((t) => strategyTradeIds.has(t.worker_id))
 
@@ -459,6 +411,7 @@ export default function TradingStrategy() {
   }
 
   const isDCA = strategy.strategy === 'DCA'
+  const runningWorkers = strategyWorkers.filter((w) => w.status === 'running')
 
   return (
     <div className="min-h-screen bg-background pb-24">
@@ -471,8 +424,13 @@ export default function TradingStrategy() {
         >
           <ArrowLeft size={20} />
         </button>
-        <div>
-          <h1 className="text-foreground text-lg font-bold leading-tight">{strategy.name}</h1>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-foreground text-lg font-bold leading-tight truncate">{strategy.name}</h1>
+            {runningWorkers.length > 0 && (
+              <Badge variant="success" className="text-xs shrink-0">{runningWorkers.length} active</Badge>
+            )}
+          </div>
           <p className="text-[#a78bfa] text-xs">{strategy.strategy}</p>
         </div>
       </div>
@@ -499,9 +457,9 @@ export default function TradingStrategy() {
             <>
               <span className="bg-input border border-border rounded-full px-2.5 py-1 text-foreground">
                 {(() => {
-                  const swapSyms = strategy.symbols.filter(s => s.market_type === 'swap')
+                  const swapSyms = strategy.symbols.filter((s) => s.market_type === 'swap')
                   if (swapSyms.length === 0) return 'Spot'
-                  const leverages = [...new Set(swapSyms.map(s => `${s.leverage}×`))].join('/')
+                  const leverages = [...new Set(swapSyms.map((s) => `${s.leverage}×`))].join('/')
                   return leverages + ' Futures'
                 })()}
               </span>
@@ -525,11 +483,11 @@ export default function TradingStrategy() {
                 <br />
                 • Max {strategy.settings?.max_orders ?? 5} orders per cycle · TP at avg entry +{strategy.settings?.take_profit_percent ?? 1.0}%
                 <br />
-                • Total budget is split proportionally — all orders combined stay within the set amount
+                • Total budget split proportionally — all orders stay within the set amount
               </>
             ) : (
               <>
-                • Worker runs automatically in the background
+                • Runs automatically in the background
                 <br />
                 • D1 MACD bullish crossover → opens a Long trade
                 <br />
@@ -570,33 +528,16 @@ export default function TradingStrategy() {
           </Card>
         )}
 
-        {/* Start worker */}
+        {/* Tokens panel */}
         <div>
-          <h2 className="text-foreground font-semibold text-sm mb-3">Start Worker</h2>
-          <StartWorkerForm
+          <h2 className="text-foreground font-semibold text-sm mb-3">Trading Tokens</h2>
+          <TokensPanel
             strategy={strategy}
-            subscription={activeSub}
             exchanges={exchanges}
-            runningCount={runningWorkers.length}
+            subscription={activeSub}
+            workers={workers}
           />
         </div>
-
-        {/* Workers */}
-        {strategyWorkers.length > 0 && (
-          <div>
-            <h2 className="text-foreground font-semibold text-sm mb-3">
-              Workers
-              {runningWorkers.length > 0 && (
-                <Badge variant="success" className="ml-2 text-xs">{runningWorkers.length} running</Badge>
-              )}
-            </h2>
-            <div className="flex flex-col gap-2.5">
-              {strategyWorkers.map((w) => (
-                <WorkerCard key={w.id} worker={w} trades={strategyTrades} />
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Trade history */}
         {strategyTrades.length > 0 && (
