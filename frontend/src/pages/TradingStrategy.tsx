@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
-// Tokens panel — replaces StartWorkerForm + WorkerCard
+// Tokens panel — card grid layout
 // ---------------------------------------------------------------------------
 
 function TokensPanel({
@@ -40,16 +40,11 @@ function TokensPanel({
 
   const [selectedExchangeId, setSelectedExchangeId] = useState(defaultExchangeId)
 
-  // Budget state
-  const [groupBudget, setGroupBudget] = useState('')    // USDT total
-  const [groupPercent, setGroupPercent] = useState('')  // % of balance (synced)
-
-  // Per-token margin state
-  // 'group': equal split | 'per-token': each token has its own amount
+  const [groupBudget, setGroupBudget] = useState('')
+  const [groupPercent, setGroupPercent] = useState('')
   const [marginMode, setMarginMode] = useState<'group' | 'per-token'>('group')
   const [perTokenMargins, setPerTokenMargins] = useState<Record<string, string>>({})
 
-  // Token enable/disable (for inactive tokens to start)
   const startTokens = useStartTokens()
   const stopTokens = useStopTokens()
 
@@ -63,25 +58,21 @@ function TokensPanel({
   )
 
   const activeSymbols: string[] = activeWorker?.selected_symbols ?? []
-
   const allSymbols = (strategy.symbols ?? []).map((s) => s.symbol)
   const inactiveSymbols = allSymbols.filter((s) => !activeSymbols.includes(s))
 
-  // All inactive tokens are enabled by default
-  const [enabledTokens, setEnabledTokens] = useState<Set<string>>(
+  const [selectedInactive, setSelectedInactive] = useState<Set<string>>(
     () => new Set(inactiveSymbols),
   )
   const [selectedForStop, setSelectedForStop] = useState<string[]>([])
 
-  const enabledList = inactiveSymbols.filter((s) => enabledTokens.has(s))
+  const enabledList = inactiveSymbols.filter((s) => selectedInactive.has(s))
 
-  // Resolve available balance for the selected exchange
   const selectedExchange = verifiedExchanges.find((e) => String(e.id) === selectedExchangeId)
   const availableBalance = selectedExchange?.balance_usdt_free != null
     ? parseFloat(String(selectedExchange.balance_usdt_free))
     : null
 
-  // Synced group budget / percent
   const handleGroupBudgetChange = (val: string) => {
     setGroupBudget(val)
     if (availableBalance && val !== '' && !isNaN(parseFloat(val))) {
@@ -104,10 +95,8 @@ function TokensPanel({
     ? totalBudget / enabledList.length
     : 0
 
-  // Per-token mode: switch from group → per-token
   const activatePerTokenMode = (editedSym: string, newVal: string) => {
     if (marginMode === 'group') {
-      // Snapshot current equal-split values for all enabled tokens
       const snapshot: Record<string, string> = {}
       for (const sym of enabledList) {
         snapshot[sym] = equalShare > 0 ? equalShare.toFixed(2) : ''
@@ -125,7 +114,6 @@ function TokensPanel({
     setPerTokenMargins({})
   }
 
-  // Compute symbol_margins for the payload
   const buildSymbolMargins = (symbols: string[]): Record<string, number> => {
     const result: Record<string, number> = {}
     for (const sym of symbols) {
@@ -150,13 +138,12 @@ function TokensPanel({
   const runningCount = workers.filter((w) => w.status === 'running').length
   const canStartNew = !activeWorker && runningCount < maxSlots && !!subscription
 
-  const handleStart = (symbolsToStart: string[]) => {
-    const syms = symbolsToStart.filter((s) => enabledTokens.has(s))
-    if (syms.length === 0) return
-    const symMargins = buildSymbolMargins(syms)
+  const handleStart = () => {
+    if (enabledList.length === 0) return
+    const symMargins = buildSymbolMargins(enabledList)
     startTokens.mutate({
       strategy_id: strategy.id,
-      symbols: syms,
+      symbols: enabledList,
       symbol_margins: symMargins,
       user_exchange_id: userExchangeId,
     })
@@ -194,6 +181,9 @@ function TokensPanel({
     )
   }
 
+  const startPending = startTokens.isPending
+  const stopPending = stopTokens.isPending
+
   return (
     <div className="space-y-4">
       {/* Exchange selector */}
@@ -228,12 +218,8 @@ function TokensPanel({
       {/* Budget section */}
       {inactiveSymbols.length > 0 && (
         <div>
-          <Label className="text-xs text-muted-foreground mb-1.5 block">
-            Budget (USDT)
-          </Label>
-
+          <Label className="text-xs text-muted-foreground mb-1.5 block">Budget (USDT)</Label>
           {marginMode === 'group' ? (
-            /* Group mode */
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <div className="relative">
@@ -263,14 +249,13 @@ function TokensPanel({
                   </>
                 )}
               </div>
-              {equalShare > 0 && (
+              {equalShare > 0 && enabledList.length > 0 && (
                 <p className="text-[#a78bfa] text-xs">
                   {enabledList.length} token{enabledList.length !== 1 ? 's' : ''} × ${equalShare.toFixed(2)} each
                 </p>
               )}
             </div>
           ) : (
-            /* Per-token mode banner */
             <div className="flex items-center gap-2 flex-wrap">
               <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-lg px-3 py-2 text-xs text-yellow-300 flex items-center gap-1.5">
                 <span>⚠️</span>
@@ -287,89 +272,33 @@ function TokensPanel({
         </div>
       )}
 
-      {/* Inactive tokens (to start) */}
-      {inactiveSymbols.length > 0 && (
-        <div>
-          <Label className="text-xs text-muted-foreground mb-2 block">
-            Available tokens
-            <span className="ml-1.5 text-[11px]">
-              ({enabledList.length}/{inactiveSymbols.length} selected)
-            </span>
-          </Label>
-          <div className="space-y-1.5">
-            {inactiveSymbols.map((sym) => {
-              const isEnabled = enabledTokens.has(sym)
-              const displayAmount = marginMode === 'per-token'
+      {/* Token cards grid */}
+      <div>
+        <Label className="text-xs text-muted-foreground mb-2 block">
+          Tokens
+          <span className="ml-1.5 text-[11px]">
+            {activeSymbols.length > 0 && `${activeSymbols.length} active`}
+            {activeSymbols.length > 0 && enabledList.length > 0 && ' · '}
+            {enabledList.length > 0 && `${enabledList.length} selected`}
+          </span>
+        </Label>
+        <div className="grid grid-cols-2 gap-2">
+          {allSymbols.map((sym) => {
+            const isActive = activeSymbols.includes(sym)
+            const isSelectedForStop = selectedForStop.includes(sym)
+            const isSelectedForStart = selectedInactive.has(sym)
+            const isStarting = startPending && isSelectedForStart && !isActive
+            const isStopping = stopPending && isSelectedForStop && isActive
+            const tokenBudget = activeWorker?.symbol_margins?.[sym]
+            const displayAmount = isActive ? null : (
+              marginMode === 'per-token'
                 ? (perTokenMargins[sym] ?? '')
-                : isEnabled && equalShare > 0
+                : isSelectedForStart && equalShare > 0
                 ? equalShare.toFixed(2)
                 : ''
+            )
 
-              return (
-                <div key={sym} className="flex items-center gap-2">
-                  {/* Enable/disable toggle */}
-                  <button
-                    onClick={() =>
-                      setEnabledTokens((prev) => {
-                        const next = new Set(prev)
-                        if (next.has(sym)) next.delete(sym)
-                        else next.add(sym)
-                        return next
-                      })
-                    }
-                    className={cn(
-                      'w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors',
-                      isEnabled
-                        ? 'bg-[#6c47ff] border-[#6c47ff]'
-                        : 'bg-transparent border-border hover:border-[#6c47ff]/50',
-                    )}
-                  >
-                    {isEnabled && <span className="text-white text-[10px] font-bold">✓</span>}
-                  </button>
-
-                  {/* Symbol label */}
-                  <span className={cn(
-                    'text-sm font-medium w-20',
-                    isEnabled ? 'text-foreground' : 'text-muted-foreground',
-                  )}>
-                    {sym.replace('/USDT', '')}
-                  </span>
-
-                  {/* Amount field (only when enabled) */}
-                  {isEnabled && (
-                    <div className="relative">
-                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">$</span>
-                      <Input
-                        type="number" min="0.1" step="0.1"
-                        value={displayAmount}
-                        onChange={(e) => {
-                          activatePerTokenMode(sym, e.target.value)
-                        }}
-                        placeholder={equalShare > 0 ? equalShare.toFixed(2) : '0.00'}
-                        className={cn(
-                          'pl-5 w-24 h-7 text-xs',
-                          marginMode === 'per-token' && perTokenMargins[sym] !== undefined
-                            ? 'border-[#6c47ff]/60'
-                            : '',
-                        )}
-                      />
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Active tokens (already running) */}
-      {activeSymbols.length > 0 && (
-        <div>
-          <Label className="text-xs text-muted-foreground mb-2 block">Active tokens</Label>
-          <div className="flex flex-wrap gap-2">
-            {activeSymbols.map((sym) => {
-              const forStop = selectedForStop.includes(sym)
-              const tokenMargin = activeWorker?.symbol_margins?.[sym]
+            if (isActive) {
               return (
                 <button
                   key={sym}
@@ -378,82 +307,162 @@ function TokensPanel({
                       prev.includes(sym) ? prev.filter((s) => s !== sym) : [...prev, sym],
                     )
                   }
+                  disabled={isStopping}
                   className={cn(
-                    'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all',
-                    forStop
-                      ? 'bg-destructive/20 border-destructive text-destructive'
-                      : 'bg-green-500/10 border-green-500/40 text-green-400 hover:border-destructive/60',
+                    'rounded-xl p-3 border text-left transition-all',
+                    isSelectedForStop
+                      ? 'bg-destructive/10 border-destructive/60'
+                      : 'bg-green-500/5 border-green-500/30 hover:border-green-500/60',
                   )}
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
-                  {sym.replace('/USDT', '')}
-                  {tokenMargin != null && (
-                    <span className="opacity-70">${tokenMargin.toFixed ? tokenMargin.toFixed(2) : tokenMargin}</span>
-                  )}
+                  <div className="flex items-start justify-between gap-1">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className={cn(
+                          'w-1.5 h-1.5 rounded-full shrink-0',
+                          isStopping ? 'bg-muted-foreground animate-pulse' : 'bg-green-400',
+                        )} />
+                        <span className="text-foreground text-sm font-semibold truncate">
+                          {sym.replace('/USDT', '')}
+                        </span>
+                      </div>
+                      <span className="text-muted-foreground text-[11px]">USDT</span>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className={cn(
+                        'text-[11px] font-medium mb-0.5',
+                        isSelectedForStop ? 'text-destructive' : 'text-green-400',
+                      )}>
+                        {isStopping ? 'Stopping…' : isSelectedForStop ? 'Stop?' : 'Active'}
+                      </div>
+                      {tokenBudget != null && (
+                        <div className="text-foreground text-xs font-semibold">
+                          ${Number(tokenBudget).toFixed(2)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </button>
               )
-            })}
-          </div>
+            }
+
+            return (
+              <div
+                key={sym}
+                className={cn(
+                  'rounded-xl p-3 border transition-all',
+                  isSelectedForStart
+                    ? 'bg-[#6c47ff]/5 border-[#6c47ff]/40'
+                    : 'bg-input border-border opacity-60',
+                )}
+              >
+                <button
+                  className="w-full text-left"
+                  onClick={() =>
+                    setSelectedInactive((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(sym)) next.delete(sym)
+                      else next.add(sym)
+                      return next
+                    })
+                  }
+                >
+                  <div className="flex items-start justify-between gap-1 mb-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className={cn(
+                          'w-1.5 h-1.5 rounded-full shrink-0 transition-colors',
+                          isSelectedForStart ? 'bg-[#6c47ff]' : 'bg-muted-foreground/40',
+                        )} />
+                        <span className={cn(
+                          'text-sm font-semibold truncate',
+                          isSelectedForStart ? 'text-foreground' : 'text-muted-foreground',
+                        )}>
+                          {sym.replace('/USDT', '')}
+                        </span>
+                      </div>
+                      <span className="text-muted-foreground text-[11px]">USDT</span>
+                    </div>
+                    <div className={cn(
+                      'text-[11px] font-medium shrink-0',
+                      isSelectedForStart ? 'text-[#a78bfa]' : 'text-muted-foreground/50',
+                    )}>
+                      {isStarting ? 'Starting…' : isSelectedForStart ? 'Selected' : 'Inactive'}
+                    </div>
+                  </div>
+                </button>
+                {isSelectedForStart && (
+                  <div className="relative" onClick={(e) => e.stopPropagation()}>
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">$</span>
+                    <Input
+                      type="number" min="0.1" step="0.1"
+                      value={displayAmount ?? ''}
+                      onChange={(e) => activatePerTokenMode(sym, e.target.value)}
+                      placeholder={equalShare > 0 ? equalShare.toFixed(2) : '0.00'}
+                      className={cn(
+                        'pl-5 w-full h-7 text-xs',
+                        marginMode === 'per-token' && perTokenMargins[sym] !== undefined
+                          ? 'border-[#6c47ff]/60'
+                          : '',
+                      )}
+                    />
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
-      )}
+      </div>
 
       {/* Action buttons */}
       <div className="flex flex-wrap gap-2 pt-1">
-        {inactiveSymbols.length > 0 && enabledList.length > 0 && (
-          <>
-            <Button
-              size="sm"
-              onClick={() => handleStart(enabledList)}
-              disabled={
-                startTokens.isPending ||
-                (marginMode === 'per-token' && !perTokenValid) ||
-                (marginMode === 'group' && !globalBudgetValid) ||
-                (!activeWorker && !canStartNew)
-              }
-              className="bg-[#6c47ff] hover:bg-[#5a3de8] text-white text-xs"
-            >
-              {startTokens.isPending
-                ? 'Starting…'
-                : enabledList.length === inactiveSymbols.length
-                ? `▶ Start All (${enabledList.length})`
-                : `▶ Start ${enabledList.length} Token${enabledList.length !== 1 ? 's' : ''}`}
-            </Button>
-          </>
+        {enabledList.length > 0 && (
+          <Button
+            size="sm"
+            onClick={handleStart}
+            disabled={
+              startPending ||
+              (marginMode === 'per-token' && !perTokenValid) ||
+              (marginMode === 'group' && !globalBudgetValid) ||
+              (!activeWorker && !canStartNew)
+            }
+            className="bg-[#6c47ff] hover:bg-[#5a3de8] text-white text-xs"
+          >
+            {startPending
+              ? 'Starting…'
+              : `▶ Start ${enabledList.length} Token${enabledList.length !== 1 ? 's' : ''}`}
+          </Button>
         )}
-        {activeSymbols.length > 0 && (
-          <>
-            {selectedForStop.length > 0 && (
-              <Button
-                size="sm" variant="outline"
-                onClick={handleStopSelected}
-                disabled={stopTokens.isPending}
-                className="border-destructive/50 text-destructive hover:bg-destructive/10 text-xs"
-              >
-                {stopTokens.isPending ? 'Stopping…' : `⏹ Stop ${selectedForStop.length} Selected`}
-              </Button>
-            )}
-            <Button
-              size="sm" variant="outline"
-              onClick={handleStopAll}
-              disabled={stopTokens.isPending}
-              className="border-destructive/50 text-destructive hover:bg-destructive/10 text-xs"
-            >
-              {stopTokens.isPending ? 'Stopping…' : '⏹ Stop All'}
-            </Button>
-          </>
+        {selectedForStop.length > 0 && (
+          <Button
+            size="sm" variant="outline"
+            onClick={handleStopSelected}
+            disabled={stopPending}
+            className="border-destructive/50 text-destructive hover:bg-destructive/10 text-xs"
+          >
+            {stopPending ? 'Stopping…' : `⏹ Stop ${selectedForStop.length}`}
+          </Button>
+        )}
+        {activeSymbols.length > 0 && selectedForStop.length === 0 && (
+          <Button
+            size="sm" variant="outline"
+            onClick={handleStopAll}
+            disabled={stopPending}
+            className="border-destructive/50 text-destructive hover:bg-destructive/10 text-xs"
+          >
+            {stopPending ? 'Stopping…' : '⏹ Stop All'}
+          </Button>
         )}
       </div>
 
-      {/* Plan limit warning */}
       {!activeWorker && runningCount >= maxSlots && (
         <p className="text-yellow-400 text-xs">
           Plan limit reached ({maxSlots} active strateg{maxSlots === 1 ? 'y' : 'ies'}). Stop another to start this one.
         </p>
       )}
 
-      {/* Feedback */}
       {startTokens.isSuccess && (
-        <p className="text-green-400 text-xs">✓ Tokens activated. Trading running in the background.</p>
+        <p className="text-green-400 text-xs">✓ Tokens activated.</p>
       )}
       {startTokens.isError && (
         <p className="text-destructive text-xs">
@@ -473,6 +482,7 @@ function TokensPanel({
     </div>
   )
 }
+
 
 
 // ---------------------------------------------------------------------------

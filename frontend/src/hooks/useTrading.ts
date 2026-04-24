@@ -23,7 +23,7 @@ export function useWorkers() {
   return useQuery({
     queryKey: ['workers'],
     queryFn: tradingApi.getWorkers,
-    refetchInterval: 15_000,
+    refetchInterval: 5_000,
   })
 }
 
