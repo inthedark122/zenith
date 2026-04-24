@@ -12,6 +12,7 @@ class TradeStatus(str, Enum):
     WIN = "win"
     LOSS = "loss"
     CLOSED = "closed"   # force-closed when the parent worker is stopped
+    STOPPED = "stopped" # stale — exchange position no longer exists
 
 
 class StrategyTrade(Base):

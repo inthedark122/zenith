@@ -33,6 +33,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.exchange.order_executor import (
     build_authenticated_exchange,
     close_long_position,
+    get_open_position_size,
     open_long_position,
 )
 from app.models.trade import StrategyTrade, TradeStatus
@@ -178,6 +179,27 @@ def run_for_worker(
                 worker.id, symbol, filled_price, initial_amount, tp_price, result["order_id"],
             )
             continue
+
+        # ── Active cycle: verify exchange position still exists ───────────
+        # If DB shows open orders but exchange has no long position, the
+        # position was closed externally. Mark stale DB records as STOPPED
+        # and let the next tick start a fresh cycle.
+        market_type_check = (
+            open_orders[0].details.get("market_type", "spot")
+            if open_orders[0].details else "spot"
+        )
+        if market_type_check != "spot":
+            live_contracts = get_open_position_size(exchange_client, symbol)
+            if live_contracts is None:
+                log.warning(
+                    "Worker #%d: DB has %d open order(s) for %s but no exchange "
+                    "position found — marking as STOPPED and restarting cycle",
+                    worker.id, order_count, symbol,
+                )
+                for t in open_orders:
+                    t.status = TradeStatus.STOPPED
+                db.flush()
+                continue
 
         # ── Active cycle: recalculate avg entry and TP ─────────────────────
         entries = [
