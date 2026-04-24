@@ -39,6 +39,7 @@ from app.models.trade import StrategyTrade, TradeStatus
 from app.models.worker import StrategyWorker
 from app.strategies.dca.strategy import (
     calculate_avg_entry,
+    calculate_base_order,
     calculate_next_amount,
     calculate_take_profit,
 )
@@ -122,7 +123,11 @@ def run_for_worker(
 
         if order_count == 0:
             # ── Start new DCA cycle ────────────────────────────────────────
-            initial_amount = float(worker.margin)
+            # Derive the base order from the total budget so that all orders
+            # (if fully executed) sum to exactly worker.margin.
+            initial_amount = calculate_base_order(
+                float(worker.margin), amount_multiplier, max_orders
+            )
             tp_price = calculate_take_profit(current_price, take_profit_percent)
 
             # Place real exchange order

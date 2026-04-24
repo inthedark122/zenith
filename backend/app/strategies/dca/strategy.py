@@ -39,3 +39,20 @@ def calculate_take_profit(avg_entry: float, take_profit_percent: float) -> float
 def calculate_next_amount(prev_amount: float, multiplier: float) -> float:
     """Next safety order amount = previous × multiplier."""
     return round(prev_amount * multiplier, 8)
+
+
+def calculate_base_order(total_margin: float, multiplier: float, max_orders: int) -> float:
+    """
+    Derive the base (first) order amount from the total DCA budget.
+
+    The full budget is distributed across all orders proportionally:
+        total_weight = 1 + m + m² + … + m^(max_orders-1)
+        base_order   = total_margin / total_weight
+
+    This ensures that if every order fires, the sum of all order amounts
+    equals exactly ``total_margin``.
+    """
+    if max_orders <= 0:
+        return total_margin
+    total_weight = sum(multiplier ** i for i in range(max_orders))
+    return total_margin / total_weight if total_weight > 0 else total_margin

@@ -167,6 +167,8 @@ function StrategyCard({
               • Each {strategy.settings?.step_percent ?? 0.5}% price drop triggers a safety order ({strategy.settings?.amount_multiplier ?? 2}× larger)
               <br />
               • Max {strategy.settings?.max_orders ?? 5} orders per cycle · TP at avg entry +{strategy.settings?.take_profit_percent ?? 1.0}%
+              <br />
+              • Your total budget is split proportionally — all orders combined stay within the set amount
             </>
           ) : (
             <>
@@ -328,7 +330,7 @@ function StrategyCard({
         {/* Margin */}
         <div>
           <Label className="mb-1 block">
-            Margin per trade (USDT){' '}
+            Total DCA budget (USDT){' '}
             {availableBalance != null ? (
               <span className="text-foreground font-semibold">
                 — available: ${availableBalance.toFixed(2)}
@@ -419,7 +421,7 @@ function WorkerRow({ worker, trades }: { worker: Worker; trades: Trade[] }) {
 
   const workerDetails = [
     { label: 'Exchange', value: worker.exchange_id.toUpperCase() },
-    { label: 'Margin/trade', value: `$${parseFloat(worker.margin).toFixed(2)}` },
+    { label: 'Total budget', value: `$${parseFloat(worker.margin).toFixed(2)}` },
     {
       label: 'Started',
       value: worker.started_at ? new Date(worker.started_at).toLocaleDateString() : '—',
