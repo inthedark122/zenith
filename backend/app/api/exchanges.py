@@ -151,9 +151,9 @@ def get_exchange_balance(
     return ExchangeBalanceResponse(accounts=accounts, last_updated=exc.balance_updated_at)
 
 
-@router.put("/{exchange_id}", response_model=UserExchangeResponse)
+@router.put("/{exc_id}", response_model=UserExchangeResponse)
 async def update_exchange(
-    exchange_id: str,
+    exc_id: int,
     payload: UserExchangeUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -162,8 +162,8 @@ async def update_exchange(
     exc = (
         db.query(UserExchange)
         .filter(
+            UserExchange.id == exc_id,
             UserExchange.user_id == current_user.id,
-            UserExchange.exchange_id == exchange_id,
         )
         .first()
     )
@@ -204,7 +204,7 @@ async def update_exchange(
     if credentials_changed:
         task = ExchangeValidationTask(
             user_id=current_user.id,
-            exchange_id=exchange_id,
+            exchange_id=exc.exchange_id,
             api_key=exc.api_key,
             api_secret=exc.api_secret,
             passphrase=exc.passphrase,
@@ -229,9 +229,9 @@ async def update_exchange(
     return exc
 
 
-@router.post("/{exchange_id}/revalidate", response_model=UserExchangeResponse)
+@router.post("/{exc_id}/revalidate", response_model=UserExchangeResponse)
 async def revalidate_exchange(
-    exchange_id: str,
+    exc_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -239,8 +239,8 @@ async def revalidate_exchange(
     exc = (
         db.query(UserExchange)
         .filter(
+            UserExchange.id == exc_id,
             UserExchange.user_id == current_user.id,
-            UserExchange.exchange_id == exchange_id,
         )
         .first()
     )
@@ -251,10 +251,11 @@ async def revalidate_exchange(
     exc.last_error = None
     task = ExchangeValidationTask(
         user_id=current_user.id,
-        exchange_id=exchange_id,
+        exchange_id=exc.exchange_id,
         api_key=exc.api_key,
         api_secret=exc.api_secret,
         passphrase=exc.passphrase,
+        is_demo=exc.is_demo,
     )
     db.add(task)
     db.commit()
@@ -273,23 +274,45 @@ async def revalidate_exchange(
     return exc
 
 
-@router.delete("/{exchange_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{exc_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_exchange(
-    exchange_id: str,
+    exc_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Remove a connected exchange."""
+    from app.models.worker import StrategyWorker, WorkerStatus
+
     exc = (
         db.query(UserExchange)
         .filter(
+            UserExchange.id == exc_id,
             UserExchange.user_id == current_user.id,
-            UserExchange.exchange_id == exchange_id,
         )
         .first()
     )
     if exc is None:
         raise HTTPException(status_code=404, detail="Exchange connection not found")
+
+    # Block deletion if any workers are actively running on this exchange
+    running = (
+        db.query(StrategyWorker)
+        .filter(
+            StrategyWorker.user_exchange_id == exc_id,
+            StrategyWorker.status == WorkerStatus.RUNNING,
+        )
+        .first()
+    )
+    if running:
+        raise HTTPException(
+            status_code=400,
+            detail="Stop all active strategies using this exchange before removing it.",
+        )
+
+    # Unlink stopped workers so the FK doesn't block deletion
+    db.query(StrategyWorker).filter(
+        StrategyWorker.user_exchange_id == exc_id,
+    ).update({"user_exchange_id": None})
 
     was_default = exc.is_default
     db.delete(exc)

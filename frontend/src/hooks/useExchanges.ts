@@ -46,7 +46,7 @@ export function useAddExchange() {
 export function useRevalidateExchange() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (exchangeId: string) => exchangesApi.revalidate(exchangeId),
+    mutationFn: (id: number) => exchangesApi.revalidate(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['exchanges'] }),
   })
 }
@@ -54,7 +54,7 @@ export function useRevalidateExchange() {
 export function useRemoveExchange() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (exchangeId: string) => exchangesApi.removeExchange(exchangeId),
+    mutationFn: (id: number) => exchangesApi.removeExchange(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['exchanges'] }),
   })
 }

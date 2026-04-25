@@ -27,7 +27,7 @@ function StatusBadge({ status }: { status: Exchange['status'] }) {
 
 function ExchangeCard({ exc, onDelete, deleteDisabled }: {
   exc: Exchange
-  onDelete: (id: string) => void
+  onDelete: (id: number) => void
   deleteDisabled: boolean
 }) {
   const revalidate = useRevalidateExchange()
@@ -96,7 +96,7 @@ function ExchangeCard({ exc, onDelete, deleteDisabled }: {
           <Button
             variant="danger"
             size="sm"
-            onClick={() => onDelete(exc.exchange_id)}
+            onClick={() => onDelete(exc.id)}
             disabled={deleteDisabled}
           >
             <Trash2 size={14} />
@@ -106,7 +106,7 @@ function ExchangeCard({ exc, onDelete, deleteDisabled }: {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => revalidate.mutate(exc.exchange_id)}
+              onClick={() => revalidate.mutate(exc.id)}
               disabled={isRechecking}
             >
               <RefreshCw size={14} className={isRechecking ? 'animate-spin' : ''} />
@@ -141,7 +141,7 @@ export default function Exchanges() {
   const addExchange = useAddExchange()
   const removeExchange = useRemoveExchange()
 
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<number | null>(null)
 
   const onSubmit = (data: AddExchangePayload) => {
     addExchange.mutate(data, {
@@ -152,8 +152,8 @@ export default function Exchanges() {
     })
   }
 
-  const handleDelete = (exchangeId: string) => {
-    setDeleteTarget(exchangeId)
+  const handleDelete = (id: number) => {
+    setDeleteTarget(id)
   }
 
   return (
@@ -315,11 +315,11 @@ export default function Exchanges() {
 
       <ConfirmDialog
         open={!!deleteTarget}
-        title={`Remove ${deleteTarget}?`}
+        title="Remove exchange?"
         message="This will disconnect the exchange and stop any active workers using it."
         confirmLabel="Remove"
         confirmVariant="danger"
-        onConfirm={() => { if (deleteTarget) removeExchange.mutate(deleteTarget); setDeleteTarget(null) }}
+        onConfirm={() => { if (deleteTarget != null) removeExchange.mutate(deleteTarget); setDeleteTarget(null) }}
         onCancel={() => setDeleteTarget(null)}
       />
     </div>
