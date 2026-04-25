@@ -89,7 +89,7 @@ async def _process_task(task_id: int) -> None:
         # Update the user_exchanges status and cached balance
         exc_row = (
             db.query(UserExchange)
-            .filter_by(user_id=task.user_id, exchange_id=task.exchange_id)
+            .filter_by(user_id=task.user_id, exchange_id=task.exchange_id, is_demo=task.is_demo)
             .first()
         )
         if exc_row:
