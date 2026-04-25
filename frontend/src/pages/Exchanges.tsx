@@ -102,17 +102,15 @@ function ExchangeCard({ exc, onDelete, deleteDisabled }: {
             <Trash2 size={14} />
             Remove
           </Button>
-          {exc.status !== 'pending' && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => revalidate.mutate(exc.id)}
-              disabled={isRechecking}
-            >
-              <RefreshCw size={14} className={isRechecking ? 'animate-spin' : ''} />
-              {isRechecking ? 'Checking…' : 'Recheck'}
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => revalidate.mutate(exc.id)}
+            disabled={isRechecking}
+          >
+            <RefreshCw size={14} className={isRechecking ? 'animate-spin' : ''} />
+            {isRechecking ? 'Checking…' : exc.status === 'pending' ? 'Retry' : 'Recheck'}
+          </Button>
         </div>
       </div>
     </Card>
