@@ -49,6 +49,9 @@ def _validate_exchange_sync(task: ExchangeValidationTask) -> tuple[bool, float |
             "password": task.passphrase or "",
         })
 
+        if getattr(task, "is_demo", False):
+            client.set_sandbox_mode(True)
+
         # OKX uses a single unified Trading account
         params = {"type": "trading"} if task.exchange_id == "okx" else {}
         raw = client.fetch_balance(params)

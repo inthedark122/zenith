@@ -86,6 +86,8 @@ def build_authenticated_exchange(user_exchange: UserExchange) -> ccxt.Exchange:
         "secret": user_exchange.api_secret,
         "password": user_exchange.passphrase or "",
     })
+    if getattr(user_exchange, "is_demo", False):
+        client.set_sandbox_mode(True)
     return client
 
 

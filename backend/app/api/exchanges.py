@@ -47,19 +47,21 @@ async def add_exchange(
     current_user: User = Depends(get_current_user),
 ):
     """Connect a new exchange. Credentials are saved then validated via the trading worker."""
-    # Check for duplicate (user_id, exchange_id) — one connection per exchange
+    # Check for duplicate (user_id, exchange_id, is_demo) — one connection per exchange+mode
     existing = (
         db.query(UserExchange)
         .filter(
             UserExchange.user_id == current_user.id,
             UserExchange.exchange_id == payload.exchange_id,
+            UserExchange.is_demo == payload.is_demo,
         )
         .first()
     )
     if existing:
+        mode = "demo" if payload.is_demo else "live"
         raise HTTPException(
             status_code=400,
-            detail=f"Exchange '{payload.exchange_id}' is already connected. Use PUT to update.",
+            detail=f"Exchange '{payload.exchange_id}' ({mode}) is already connected. Use PUT to update.",
         )
 
     # If this is the first exchange or is_default=True, ensure it becomes default
@@ -84,6 +86,7 @@ async def add_exchange(
         api_secret=payload.api_secret,
         passphrase=payload.passphrase,
         is_default=is_default,
+        is_demo=payload.is_demo,
         status="pending",
     )
     db.add(exc)
@@ -96,6 +99,7 @@ async def add_exchange(
         api_key=payload.api_key,
         api_secret=payload.api_secret,
         passphrase=payload.passphrase,
+        is_demo=payload.is_demo,
     )
     db.add(task)
     db.commit()
@@ -178,6 +182,11 @@ async def update_exchange(
     if payload.passphrase is not None:
         exc.passphrase = payload.passphrase
         credentials_changed = True
+    if payload.is_demo is not None:
+        if payload.is_demo and exc.exchange_id != "okx":
+            raise HTTPException(status_code=400, detail="Demo trading is only supported for OKX")
+        exc.is_demo = payload.is_demo
+        credentials_changed = True  # re-validate to confirm demo mode works
     if payload.is_default is True:
         db.query(UserExchange).filter(
             UserExchange.user_id == current_user.id,
@@ -199,6 +208,7 @@ async def update_exchange(
             api_key=exc.api_key,
             api_secret=exc.api_secret,
             passphrase=exc.passphrase,
+            is_demo=exc.is_demo,
         )
         db.add(task)
 

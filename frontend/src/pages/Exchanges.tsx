@@ -1,6 +1,6 @@
 import { ArrowLeft, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 
 import { useAddExchange, useExchanges, useRemoveExchange, useRevalidateExchange, useSupportedExchanges } from '../hooks/useExchanges'
@@ -43,6 +43,9 @@ function ExchangeCard({ exc, onDelete, deleteDisabled }: {
         <div className="flex-1 min-w-0">
           <div className="text-foreground font-bold text-sm flex items-center gap-2 flex-wrap">
             {exc.exchange_id.toUpperCase()}
+            {exc.is_demo && (
+              <Badge variant="warning" className="text-[10px]">DEMO</Badge>
+            )}
             {exc.is_default && (
               <Badge variant="default" className="text-[10px]">DEFAULT</Badge>
             )}
@@ -123,8 +126,11 @@ export default function Exchanges() {
     register,
     handleSubmit,
     reset,
+    control,
     formState: { errors },
   } = useForm<AddExchangePayload>()
+
+  const selectedExchangeId = useWatch({ control, name: 'exchange_id' })
 
   const { data: exchanges = [] } = useExchanges()
   const { data: supportedData } = useSupportedExchanges()
@@ -271,6 +277,20 @@ export default function Exchanges() {
                 {...register('passphrase')}
               />
             </div>
+
+            {selectedExchangeId === 'okx' && (
+              <div className="mb-4 flex items-center gap-2">
+                <input
+                  id="is_demo"
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border accent-primary"
+                  {...register('is_demo')}
+                />
+                <Label htmlFor="is_demo" className="cursor-pointer">
+                  Demo trading (paper money)
+                </Label>
+              </div>
+            )}
 
             <div className="flex gap-3 mt-1">
               <Button

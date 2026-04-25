@@ -13,12 +13,20 @@ class UserExchangeCreate(BaseModel):
     api_secret: str
     passphrase: Optional[str] = None
     is_default: bool = False
+    is_demo: bool = False
 
     @field_validator("exchange_id")
     @classmethod
     def validate_exchange_id(cls, v: str) -> str:
         if v not in SUPPORTED_EXCHANGES:
             raise ValueError(f"exchange_id must be one of {SUPPORTED_EXCHANGES}")
+        return v
+
+    @field_validator("is_demo")
+    @classmethod
+    def validate_demo_only_for_okx(cls, v: bool, info) -> bool:
+        if v and info.data.get("exchange_id") != "okx":
+            raise ValueError("Demo trading is only supported for OKX")
         return v
 
 
@@ -28,6 +36,7 @@ class UserExchangeUpdate(BaseModel):
     api_secret: Optional[str] = None
     passphrase: Optional[str] = None
     is_default: Optional[bool] = None
+    is_demo: Optional[bool] = None
 
 
 class UserExchangeResponse(BaseModel):
@@ -36,6 +45,7 @@ class UserExchangeResponse(BaseModel):
     exchange_id: str
     label: Optional[str]
     is_default: bool
+    is_demo: bool = False
     status: str
     last_error: Optional[str] = None
     balance_usdt_free: Optional[float] = None

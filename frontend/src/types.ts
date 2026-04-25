@@ -33,6 +33,7 @@ export interface Exchange {
   label?: string
   api_key?: string
   is_default: boolean
+  is_demo: boolean
   status: 'pending' | 'verified' | 'invalid'
   last_error?: string | null
   balance_usdt_free?: number | null
@@ -50,6 +51,7 @@ export interface AddExchangePayload {
   api_key: string
   api_secret: string
   passphrase?: string
+  is_demo?: boolean
 }
 
 export interface ExchangeAccountBalance {

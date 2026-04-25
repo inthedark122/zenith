@@ -25,6 +25,7 @@ class ExchangeValidationTask(Base):
     api_key = Column(String, nullable=False)
     api_secret = Column(String, nullable=False)
     passphrase = Column(String, nullable=True)
+    is_demo = Column(Boolean, default=False, nullable=False)
     status = Column(String, nullable=False, default="processing")  # processing | done | error
     result_ok = Column(Boolean, nullable=True)
     result_balance = Column(Float, nullable=True)

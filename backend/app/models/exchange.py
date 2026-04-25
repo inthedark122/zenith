@@ -30,7 +30,7 @@ class UserExchange(Base):
     """
 
     __tablename__ = "user_exchanges"
-    __table_args__ = (UniqueConstraint("user_id", "exchange_id", name="uq_user_exchange"),)
+    __table_args__ = (UniqueConstraint("user_id", "exchange_id", "is_demo", name="uq_user_exchange_demo"),)
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -39,6 +39,7 @@ class UserExchange(Base):
     api_key = Column(String, nullable=False)
     api_secret = Column(String, nullable=False)
     passphrase = Column(String, nullable=True)     # required by OKX, optional elsewhere
+    is_demo = Column(Boolean, default=False, nullable=False)
     is_default = Column(Boolean, default=False)
 
     # Worker-managed validation & balance cache
