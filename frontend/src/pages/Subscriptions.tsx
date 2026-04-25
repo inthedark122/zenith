@@ -1,5 +1,6 @@
 import { ArrowLeft, Crown, Leaf, Zap } from 'lucide-react'
 import { type LucideIcon } from 'lucide-react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { useCancelSubscription, useMySubs, usePlans, useSubscribe } from '../hooks/useSubscriptions'
@@ -7,6 +8,7 @@ import { useWallet } from '../hooks/useWallet'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 interface PlanConfig {
   color: string
@@ -31,14 +33,24 @@ export default function Subscriptions() {
 
   const activeSub = mySubs.find((s) => s.status === 'active')
 
+  type DialogState = { title: string; message?: string; confirmLabel: string; onConfirm: () => void } | null
+  const [dialog, setDialog] = useState<DialogState>(null)
+
   const handleBuy = (plan: string) => {
-    if (!window.confirm(`Activate the ${plan} plan?`)) return
-    subscribeMutation.mutate({ plan })
+    setDialog({
+      title: `Activate the ${plan.charAt(0).toUpperCase() + plan.slice(1)} plan?`,
+      confirmLabel: 'Activate',
+      onConfirm: () => subscribeMutation.mutate({ plan }),
+    })
   }
 
   const handleCancel = (subId: number) => {
-    if (!window.confirm('Cancel your subscription?')) return
-    cancelMutation.mutate(subId)
+    setDialog({
+      title: 'Cancel your subscription?',
+      message: 'All running trading workers will be stopped when your subscription ends.',
+      confirmLabel: 'Cancel subscription',
+      onConfirm: () => cancelMutation.mutate(subId),
+    })
   }
 
   return (
@@ -184,6 +196,16 @@ export default function Subscriptions() {
             ))}
         </>
       )}
+
+      <ConfirmDialog
+        open={!!dialog}
+        title={dialog?.title ?? ''}
+        message={dialog?.message}
+        confirmLabel={dialog?.confirmLabel ?? 'Confirm'}
+        confirmVariant={dialog?.confirmLabel?.toLowerCase().includes('cancel') ? 'danger' : 'default'}
+        onConfirm={() => { dialog?.onConfirm(); setDialog(null) }}
+        onCancel={() => setDialog(null)}
+      />
     </div>
   )
 }

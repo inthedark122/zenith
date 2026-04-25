@@ -8,6 +8,7 @@ import { AddExchangePayload, Exchange } from '../types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
@@ -134,6 +135,8 @@ export default function Exchanges() {
   const addExchange = useAddExchange()
   const removeExchange = useRemoveExchange()
 
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+
   const onSubmit = (data: AddExchangePayload) => {
     addExchange.mutate(data, {
       onSuccess: () => {
@@ -144,8 +147,7 @@ export default function Exchanges() {
   }
 
   const handleDelete = (exchangeId: string) => {
-    if (!window.confirm(`Remove ${exchangeId}?`)) return
-    removeExchange.mutate(exchangeId)
+    setDeleteTarget(exchangeId)
   }
 
   return (
@@ -290,6 +292,16 @@ export default function Exchanges() {
           </form>
         </Card>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title={`Remove ${deleteTarget}?`}
+        message="This will disconnect the exchange and stop any active workers using it."
+        confirmLabel="Remove"
+        confirmVariant="danger"
+        onConfirm={() => { if (deleteTarget) removeExchange.mutate(deleteTarget); setDeleteTarget(null) }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

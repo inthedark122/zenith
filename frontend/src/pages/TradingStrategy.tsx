@@ -30,6 +30,7 @@ function TokensPanel({
   workers: Worker[]
   trades: Trade[]
 }) {
+  const navigate = useNavigate()
   const verifiedExchanges = exchanges.filter((e) => e.status === 'verified')
 
   // Auto-select exchange: prefer one with a running worker for this strategy
@@ -176,8 +177,11 @@ function TokensPanel({
 
   if (!subscription) {
     return (
-      <Card className="p-4 border-border bg-input text-center">
+      <Card className="p-4 border-border bg-input text-center space-y-3">
         <p className="text-muted-foreground text-sm">An active subscription is required to trade.</p>
+        <Button size="sm" onClick={() => navigate('/subscriptions')}>
+          View Plans
+        </Button>
       </Card>
     )
   }

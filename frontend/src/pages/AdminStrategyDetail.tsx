@@ -31,6 +31,7 @@ import { Badge } from '@/components/ui/badge'
 import { BacktestChart } from '@/components/ui/backtest-chart'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
@@ -174,6 +175,7 @@ export default function AdminStrategyDetail() {
   const [backtestDays, setBacktestDays] = useState('365')
   const [backtestMargin, setBacktestMargin] = useState('100')
   const [chartSymbol, setChartSymbol] = useState<string | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
 
   useEffect(() => {
     if (strategy) {
@@ -252,10 +254,7 @@ export default function AdminStrategyDetail() {
   }
 
   const handleDelete = () => {
-    if (!window.confirm(`Delete "${strategy.name}"? This cannot be undone.`)) return
-    deleteStrategy.mutate(strategy.id, {
-      onSuccess: () => navigate('/admin/strategies'),
-    })
+    setDeleteConfirm(true)
   }
 
   const triggerBacktest = (days: number) => {
@@ -673,6 +672,19 @@ export default function AdminStrategyDetail() {
           </>
         )}
       </div>
+
+      <ConfirmDialog
+        open={deleteConfirm}
+        title={`Delete "${strategy.name}"?`}
+        message="This cannot be undone. All backtest history for this strategy will also be deleted."
+        confirmLabel="Delete"
+        confirmVariant="danger"
+        onConfirm={() => {
+          setDeleteConfirm(false)
+          deleteStrategy.mutate(strategy.id, { onSuccess: () => navigate('/admin/strategies') })
+        }}
+        onCancel={() => setDeleteConfirm(false)}
+      />
     </div>
   )
 }
