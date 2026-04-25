@@ -80,12 +80,17 @@ def build_authenticated_exchange(user_exchange: UserExchange) -> ccxt.Exchange:
     if exchange_cls is None:
         raise ValueError(f"Unsupported exchange: {user_exchange.exchange_id}")
 
-    client: ccxt.Exchange = exchange_cls({
+    constructor_opts: dict = {
         "enableRateLimit": True,
         "apiKey": user_exchange.api_key,
         "secret": user_exchange.api_secret,
         "password": user_exchange.passphrase or "",
-    })
+    }
+
+    if user_exchange.exchange_id == "okx":
+        constructor_opts["options"] = {"brokerId": "8c99bf3be03bSUDE"}
+
+    client: ccxt.Exchange = exchange_cls(constructor_opts)
     if getattr(user_exchange, "is_demo", False):
         client.set_sandbox_mode(True)
     return client
