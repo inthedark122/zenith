@@ -169,6 +169,8 @@ async def validation_loop() -> None:
     await _cleanup_old_tasks()
     await _process_pending_tasks()
 
+    _retry_counter = 0
+
     while True:
         try:
             conn = await asyncpg.connect(dsn=_asyncpg_dsn())
@@ -183,9 +185,13 @@ async def validation_loop() -> None:
             await conn.add_listener(_LISTEN_CHANNEL, _on_notify)
             log.info("Validation loop listening on channel '%s'", _LISTEN_CHANNEL)
 
-            # Keep the connection alive; reconnect if it drops
+            # Keep the connection alive; reconnect if it drops.
+            # Every ~60s also scan for tasks missed due to race with notify.
             while not conn.is_closed():
                 await asyncio.sleep(5)
+                _retry_counter += 1
+                if _retry_counter % 12 == 0:  # every 60s
+                    await _process_pending_tasks()
 
         except asyncpg.PostgresConnectionStatusError:
             log.warning("Validation loop DB connection lost, reconnecting in 5s")
